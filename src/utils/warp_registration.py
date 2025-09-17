@@ -5,8 +5,14 @@ import json
 import logging
 import asyncio
 import time
+import sys
 from typing import Optional, Dict, Any
-from src.managers.temp_email_manager import TempEmailManager, ProxyManager
+
+# Import registry manager only on Windows
+if sys.platform == "win32":
+    from src.managers.warp_registry_manager import warp_registry_manager
+else:
+    warp_registry_manager = None
 
 # Attempt to import curl_cffi
 try:
@@ -19,8 +25,7 @@ except ImportError:
 class WarpRegistrationManager:
     """Manager for Warp.dev account registration"""
     
-    def __init__(self, proxy_file: str = "proxy.txt"):
-        self.proxy_manager = ProxyManager(proxy_file)
+    def __init__(self):
         self.session: Optional[object] = None
         
         # Warp.dev API endpoints
@@ -33,13 +38,10 @@ class WarpRegistrationManager:
     async def __aenter__(self):
         """Async context manager entry"""
         if CURL_CFFI_AVAILABLE:
-            # Get random proxy
-            proxy = self.proxy_manager.get_random_proxy()
-            
-            # Configuration for curl_cffi
+            # Configuration for curl_cffi without proxy
             session_config = {
-                'verify': False,  # Отключаем проверку SSL
-                'timeout': 30,    # Устанавливаем таймаут
+                'verify': False,  # 禁用SSL验证
+                'timeout': 30,    # 设置超时
                 'headers': {
                     'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
                     'Accept': 'application/json, text/plain, */*',
@@ -50,12 +52,7 @@ class WarpRegistrationManager:
                 }
             }
             
-            if proxy:
-                proxy_config = self.proxy_manager.parse_proxy(proxy)
-                session_config.update(proxy_config)
-            else:
-                logging.info("Registration without proxy")
-                
+            logging.info("Registration using direct connection (no proxy)")
             self.session = AsyncSession(**session_config)
         else:
             self.session = None
@@ -197,9 +194,14 @@ class WarpRegistrationManager:
             return None
 
 
-async def register_warp_account(email: str, proxy_file: str = "proxy.txt") -> Optional[Dict[str, Any]]:
+async def register_warp_account(email: str) -> Optional[Dict[str, Any]]:
     """Register new Warp.dev account with given email"""
-    async with WarpRegistrationManager(proxy_file) as manager:
+    # Prepare registry environment on Windows
+    if warp_registry_manager:
+        logging.info("Preparing Warp registry environment for registration...")
+        warp_registry_manager.prepare_for_registration()
+    
+    async with WarpRegistrationManager() as manager:
         # Отправляем код подтверждения
         verification_result = await manager.send_email_verification(email)
         
@@ -215,9 +217,14 @@ async def register_warp_account(email: str, proxy_file: str = "proxy.txt") -> Op
             return None
 
 
-async def complete_warp_registration(email: str, oob_code: str, proxy_file: str = "proxy.txt") -> Optional[Dict[str, Any]]:
+async def complete_warp_registration(email: str, oob_code: str) -> Optional[Dict[str, Any]]:
     """Complete Warp.dev account registration with verification code"""
-    async with WarpRegistrationManager(proxy_file) as manager:
+    # Prepare registry environment on Windows
+    if warp_registry_manager:
+        logging.info("Preparing Warp registry environment for registration completion...")
+        warp_registry_manager.prepare_for_registration()
+    
+    async with WarpRegistrationManager() as manager:
         # Confirm code
         auth_result = await manager.verify_email_code(email, oob_code)
         

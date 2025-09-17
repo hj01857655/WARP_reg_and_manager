@@ -14,6 +14,7 @@ from datetime import datetime, timezone
 from typing import Optional
 from src.config.languages import get_language_manager, _
 from src.managers.database_manager import DatabaseManager
+from src.managers.warp_registry_manager import warp_registry_manager
 
 # OS-specific proxy managers
 from src.proxy.proxy_windows import WindowsProxyManager
@@ -354,6 +355,14 @@ class MainWindow(QMainWindow):
         self.account_manager = DatabaseManager()
         self.proxy_manager = MitmProxyManager()
         self.proxy_enabled = False
+        
+        # Initialize registry manager (only on Windows)
+        if sys.platform == "win32":
+            self.registry_manager = warp_registry_manager
+            # Start registry monitoring
+            self.registry_manager.start_monitoring()
+        else:
+            self.registry_manager = None
 
         # If proxy is disabled, clear active account
         if not ProxyManager.is_proxy_enabled():

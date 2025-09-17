@@ -12,8 +12,7 @@ from src.utils.warp_registration import WarpRegistrationManager
 class AutoAccountCreator:
     """Automatic Warp.dev account creator with email verification"""
     
-    def __init__(self, proxy_file: str = "proxy.txt"):
-        self.proxy_file = proxy_file
+    def __init__(self):
         self.max_wait_time = 60  # Maximum wait time for email in seconds
         self.check_interval = 5   # Check email every 5 seconds
         
@@ -36,7 +35,7 @@ class AutoAccountCreator:
     def _get_user_friendly_error(self, error_msg: str) -> str:
         """Convert technical error to user-friendly message"""
         if self._is_proxy_error(error_msg):
-            return "Proxy connection error. Please try a different proxy from proxy.txt or check proxy settings."
+            return "Network connection error. Please check your internet connection."
         return f"Registration error: {error_msg}"
     
     async def create_account(self) -> Optional[Dict[str, Any]]:
@@ -78,11 +77,11 @@ class AutoAccountCreator:
             error_msg = str(e)
             logging.error(f"Error in create_account: {error_msg}")
             
-            # Check if it's a proxy-related error
+            # Check if it's a network-related error
             if self._is_proxy_error(error_msg):
                 return {
-                    "error": "proxy_error",
-                    "message": "Proxy connection failed. Please try a different proxy.",
+                    "error": "network_error",
+                    "message": "Network connection failed. Please check your internet connection.",
                     "technical_details": error_msg
                 }
             else:
@@ -96,44 +95,44 @@ class AutoAccountCreator:
     async def _create_temp_email(self) -> Optional[Dict[str, Any]]:
         """Create temporary email address"""
         try:
-            async with TempEmailManager(self.proxy_file) as manager:
+            async with TempEmailManager() as manager:
                 result = await manager.create_temp_email()
                 return result
         except Exception as e:
             error_msg = str(e)
-            # Check for proxy-related errors
+            # Check for network-related errors
             if self._is_proxy_error(error_msg):
-                proxy_error_msg = self._get_proxy_error_message(error_msg)
-                logging.error(f"Proxy error creating temp email: {proxy_error_msg}")
-                raise Exception(proxy_error_msg)
+                network_error_msg = self._get_proxy_error_message(error_msg)
+                logging.error(f"Network error creating temp email: {network_error_msg}")
+                raise Exception(network_error_msg)
             else:
                 logging.error(f"Error creating temp email: {e}")
                 return None
     
     def _get_proxy_error_message(self, error_msg: str) -> str:
-        """Get user-friendly proxy error message"""
+        """Get user-friendly network error message"""
         if "407" in error_msg or "CONNECT tunnel failed" in error_msg:
-            return "Proxy authentication failed or proxy server rejected connection. Please try a different proxy."
+            return "Network authentication failed. Please check your internet connection."
         elif "Network is unreachable" in error_msg or "Connection refused" in error_msg:
-            return "Cannot connect to proxy server. Please check proxy settings or try a different proxy."
+            return "Cannot connect to server. Please check your internet connection."
         elif "Timeout" in error_msg:
-            return "Proxy connection timeout. Please try a different proxy or check network connection."
+            return "Connection timeout. Please check your network connection."
         else:
-            return "Proxy connection error. Please try a different proxy from proxy.txt."
+            return "Network connection error. Please check your internet connection."
     
     async def _send_verification_code(self, email: str) -> bool:
         """Send verification code to email"""
         try:
-            async with WarpRegistrationManager(self.proxy_file) as manager:
+            async with WarpRegistrationManager() as manager:
                 result = await manager.send_email_verification(email)
                 return result is not None
         except Exception as e:
             error_msg = str(e)
-            # Check for proxy-related errors
+            # Check for network-related errors
             if self._is_proxy_error(error_msg):
-                proxy_error_msg = self._get_proxy_error_message(error_msg)
-                logging.error(f"Proxy error sending verification: {proxy_error_msg}")
-                raise Exception(proxy_error_msg)
+                network_error_msg = self._get_proxy_error_message(error_msg)
+                logging.error(f"Network error sending verification: {network_error_msg}")
+                raise Exception(network_error_msg)
             else:
                 logging.error(f"Error sending verification: {e}")
                 return False
@@ -141,7 +140,7 @@ class AutoAccountCreator:
     async def _wait_for_verification_email(self, token: str, url_base: str) -> Optional[str]:
         """Wait for verification email and extract oob code"""
         try:
-            async with TempEmailManager(self.proxy_file) as manager:
+            async with TempEmailManager() as manager:
                 wait_count = 0
                 max_attempts = self.max_wait_time // self.check_interval
                 
@@ -186,7 +185,7 @@ class AutoAccountCreator:
             from src.utils.warp_registration import complete_warp_registration
             
             # Use the complete registration function that includes account lookup
-            result = await complete_warp_registration(email, oob_code, self.proxy_file)
+            result = await complete_warp_registration(email, oob_code)
             
             if result and result.get('status') == 'registration_complete':
                 # Extract the complete account information
@@ -223,9 +222,9 @@ class AutoAccountCreator:
             return None
 
 
-async def create_warp_account_automatically(proxy_file: str = "proxy.txt") -> Optional[Dict[str, Any]]:
+async def create_warp_account_automatically() -> Optional[Dict[str, Any]]:
     """Convenience function to create Warp account automatically"""
-    creator = AutoAccountCreator(proxy_file)
+    creator = AutoAccountCreator()
     return await creator.create_account()
 
 

@@ -327,12 +327,7 @@ class AccountCreationWorker(QThread):
                 import asyncio
                 from src.utils.account_creator import create_warp_account_automatically
                 
-                # Check proxy availability
-                proxy_file_path = "proxy.txt"
-                if os.path.exists(proxy_file_path):
-                    self.progress.emit("Checking proxy from proxy.txt...")
-                
-                # Run automatic Warp.dev account creation
+                # Run automatic Warp.dev account creation without proxy
                 self.progress.emit("Creating temporary email address...")
                 
                 # Create new event loop for this thread
@@ -341,13 +336,13 @@ class AccountCreationWorker(QThread):
                 
                 try:
                     self.progress.emit("Sending verification code...")
-                    result = loop.run_until_complete(create_warp_account_automatically(proxy_file_path))
+                    result = loop.run_until_complete(create_warp_account_automatically())
                     
                     if result:
                         # Check if result contains error information
                         if isinstance(result, dict) and 'error' in result:
-                            if result['error'] == 'proxy_error':
-                                self.error.emit(f"Proxy Error: {result['message']}")
+                            if result['error'] == 'network_error':
+                                self.error.emit(f"Network Error: {result['message']}")
                             else:
                                 self.error.emit(f"Registration Error: {result['message']}")
                             return
