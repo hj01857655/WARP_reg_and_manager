@@ -386,6 +386,36 @@ def request(flow: http.HTTPFlow) -> None:
         return
 
     print(f"🌐 Warp Request: {flow.request.method} {flow.request.pretty_url}")
+    
+    # Print detailed request information for all app.warp.dev requests
+    print(f"\n=== WARP REQUEST DETAILS ===")
+    print(f"URL: {flow.request.pretty_url}")
+    print(f"Method: {flow.request.method}")
+    print(f"Path: {flow.request.path}")
+    print(f"Request Headers:")
+    for header_name, header_value in flow.request.headers.items():
+        if 'experiment' in header_name.lower() or 'authorization' in header_name.lower() or 'warp' in header_name.lower() or header_name.lower() in ['content-type', 'user-agent']:
+            if 'authorization' in header_name.lower():
+                print(f"  {header_name}: Bearer ...{str(header_value)[-20:] if len(str(header_value)) > 20 else header_value}")
+            else:
+                print(f"  {header_name}: {header_value}")
+    
+    # Print request body for POST requests
+    if flow.request.method == "POST" and flow.request.content:
+        try:
+            content_type = flow.request.headers.get("content-type", "")
+            if "application/json" in content_type.lower():
+                request_text = flow.request.content.decode('utf-8', errors='replace')
+                if len(request_text) > 1500:
+                    print(f"Request Body (first 1500 chars): {request_text[:1500]}...")
+                else:
+                    print(f"Request Body: {request_text}")
+            else:
+                print(f"Request Body: [Binary data - {len(flow.request.content)} bytes]")
+        except Exception as e:
+            print(f"Error reading request content: {e}")
+    
+    print(f"=== END WARP REQUEST ===")
 
     # Detect CreateGenericStringObject request - trigger user_settings.json update
     if ("/graphql/v2?op=CreateGenericStringObject" in request_url and
@@ -480,6 +510,44 @@ def response(flow: http.HTTPFlow) -> None:
         return
 
     print(f"📡 Warp Response: {flow.response.status_code} - {flow.request.pretty_url}")
+    
+    # Print detailed response information for all app.warp.dev requests
+    print(f"\n=== WARP RESPONSE DETAILS ===")
+    print(f"URL: {flow.request.pretty_url}")
+    print(f"Method: {flow.request.method}")
+    print(f"Status: {flow.response.status_code}")
+    print(f"Response Headers:")
+    for header_name, header_value in flow.response.headers.items():
+        print(f"  {header_name}: {header_value}")
+    
+    # Print request headers for context
+    print(f"Request Headers:")
+    for header_name, header_value in flow.request.headers.items():
+        if 'experiment' in header_name.lower() or 'authorization' in header_name.lower() or 'warp' in header_name.lower():
+            print(f"  {header_name}: {header_value[:50]}{'...' if len(str(header_value)) > 50 else ''}")
+    
+    # Print response content (with size limit for readability)
+    try:
+        content_type = flow.response.headers.get("content-type", "")
+        if "application/json" in content_type.lower():
+            response_text = flow.response.content.decode('utf-8', errors='replace')
+            if len(response_text) > 2000:
+                print(f"Response Content (first 2000 chars): {response_text[:2000]}...")
+                print(f"Response Content (last 500 chars): ...{response_text[-500:]}")
+            else:
+                print(f"Response Content: {response_text}")
+        elif "text/" in content_type.lower():
+            response_text = flow.response.content.decode('utf-8', errors='replace')
+            if len(response_text) > 1000:
+                print(f"Response Content (first 1000 chars): {response_text[:1000]}...")
+            else:
+                print(f"Response Content: {response_text}")
+        else:
+            print(f"Response Content: [Binary data - {len(flow.response.content)} bytes]")
+    except Exception as e:
+        print(f"Error reading response content: {e}")
+    
+    print(f"=== END WARP RESPONSE ===")
 
     # Use cached response for GetUpdatedCloudObjects request
     if ("/graphql/v2?op=GetUpdatedCloudObjects" in flow.request.pretty_url and
