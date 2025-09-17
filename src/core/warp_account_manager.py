@@ -177,25 +177,117 @@ class ActiveAccountRefreshWorker(QThread):
             print(f"Limit update error: {e}")
     
     def _get_account_limit_info(self, account_data):
-        """Get account limit information"""
+        """Get account limit information from Warp API"""
         try:
             import requests
             
+            # Get dynamic OS information
+            os_info = get_os_info()
+            
             access_token = account_data['stsTokenManager']['accessToken']
+
+            url = "https://app.warp.dev/graphql/v2?op=GetRequestLimitInfo"
             headers = {
-                'Authorization': f'Bearer {access_token}',
                 'Content-Type': 'application/json',
+                'Authorization': f'Bearer {access_token}',
+                'x-warp-client-version': 'v0.2025.08.27.08.11.stable_04',
+                'x-warp-os-category': os_info['category'],
+                'x-warp-os-name': os_info['name'],
+                'x-warp-os-version': os_info['version'],
+                'Accept': '*/*',
+                'Accept-Language': 'en-US,en;q=0.9',
+                'Accept-Encoding': 'gzip, deflate, br',
                 'x-warp-manager-request': 'true'
             }
-            
-            url = "https://api.cloudflareclient.com/v0a2158/reg"
-            response = requests.get(url, headers=headers, timeout=10, verify=False)
-            
+
+            query = """
+            query GetRequestLimitInfo($requestContext: RequestContext!) {
+              user(requestContext: $requestContext) {
+                __typename
+                ... on UserOutput {
+                  user {
+                    requestLimitInfo {
+                      isUnlimited
+                      nextRefreshTime
+                      requestLimit
+                      requestsUsedSinceLastRefresh
+                      requestLimitRefreshDuration
+                      isUnlimitedAutosuggestions
+                      acceptedAutosuggestionsLimit
+                      acceptedAutosuggestionsSinceLastRefresh
+                      isUnlimitedVoice
+                      voiceRequestLimit
+                      voiceRequestsUsedSinceLastRefresh
+                      voiceTokenLimit
+                      voiceTokensUsedSinceLastRefresh
+                      isUnlimitedCodebaseIndices
+                      maxCodebaseIndices
+                      maxFilesPerRepo
+                      embeddingGenerationBatchSize
+                    }
+                  }
+                }
+                ... on UserFacingError {
+                  error {
+                    __typename
+                    ... on SharedObjectsLimitExceeded {
+                      limit
+                      objectType
+                      message
+                    }
+                    ... on PersonalObjectsLimitExceeded {
+                      limit
+                      objectType
+                      message
+                    }
+                    ... on AccountDelinquencyError {
+                      message
+                    }
+                    ... on GenericStringObjectUniqueKeyConflict {
+                      message
+                    }
+                  }
+                  responseContext {
+                    serverVersion
+                  }
+                }
+              }
+            }
+            """
+
+            payload = {
+                "query": query,
+                "variables": {
+                    "requestContext": {
+                        "clientContext": {
+                            "version": "v0.2025.08.27.08.11.stable_04"
+                        },
+                        "osContext": {
+                            "category": os_info['category'],
+                            "linuxKernelVersion": None,
+                            "name": os_info['category'],
+                            "version": os_info['version']
+                        }
+                    }
+                },
+                "operationName": "GetRequestLimitInfo"
+            }
+
+            # Direct connection - completely bypass proxy
+            response = requests.post(url, headers=headers, json=payload, timeout=30, verify=False)
+
             if response.status_code == 200:
-                return response.json()
+                data = response.json()
+                if 'data' in data and data['data'] and 'user' in data['data']:
+                    user_data = data['data']['user']
+                    if user_data and user_data.get('__typename') == 'UserOutput':
+                        user_info = user_data.get('user')
+                        if user_info:
+                            return user_info.get('requestLimitInfo')
+                        return None
             return None
         except Exception as e:
-            print(f"Limit info error: {e}")
+            print(f"Limit information retrieval error: {e}")
             return None
 
 
