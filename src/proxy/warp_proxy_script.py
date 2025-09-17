@@ -384,6 +384,16 @@ def request(flow: http.HTTPFlow) -> None:
             {"Content-Type": "text/plain"}
         )
         return
+    
+    # Block requests to app.warp.dev/analytics/block (analytics collection)
+    if "app.warp.dev" in flow.request.pretty_host and "/analytics/block" in flow.request.path:
+        print(f"🚫 Blocked Warp analytics request: {request_url}")
+        flow.response = http.Response.make(
+            204,  # No Content
+            b"",
+            {"Content-Type": "text/plain"}
+        )
+        return
 
     print(f"🌐 Warp Request: {flow.request.method} {flow.request.pretty_url}")
     
