@@ -364,9 +364,8 @@ class MainWindow(QMainWindow):
         else:
             self.registry_manager = None
 
-        # If proxy is disabled, clear active account
-        if not ProxyManager.is_proxy_enabled():
-            self.account_manager.clear_active_account()
+        # 检查程序是否被异常关闭（如果有活跃账号但代理未运行）
+        self._check_and_cleanup_startup_state()
 
         self.init_ui()
         self.load_accounts()
@@ -403,7 +402,69 @@ class MainWindow(QMainWindow):
         self.token_worker = None
         self.token_progress_dialog = None
 
+    def _check_and_cleanup_startup_state(self):
+        """检查并清理启动时的状态不一致问题"""
+        try:
+            # 检查是否有活跃账号
+            active_account = self.account_manager.get_active_account()
+            
+            if active_account:
+                # 有活跃账号，检查mitmproxy和系统代理状态
+                mitmproxy_running = self.proxy_manager.is_running()
+                system_proxy_enabled = ProxyManager.is_proxy_enabled()
+                
+                # 如果活跃账号存在但代理服务都未运行，说明程序被异常关闭
+                if not mitmproxy_running and not system_proxy_enabled:
+                    print("⚠️ 检测到程序可能被异常关闭，清理活跃账号状态...")
+                    self.account_manager.clear_active_account()
+                elif not mitmproxy_running and system_proxy_enabled:
+                    # 系统代理启用但mitmproxy未运行，关闭系统代理
+                    print("⚠️ 检测到系统代理启用但mitmproxy未运行，关闭系统代理...")
+                    ProxyManager.disable_proxy()
+                    self.account_manager.clear_active_account()
+                else:
+                    # 状态正常或部分正常，保持原状
+                    print(f"✅ 活跃账号: {active_account}, mitmproxy: {mitmproxy_running}, 系统代理: {system_proxy_enabled}")
+            else:
+                # 没有活跃账号，检查是否有孤儿的系统代理设置
+                if ProxyManager.is_proxy_enabled():
+                    print("⚠️ 没有活跃账号但系统代理启用，关闭系统代理...")
+                    ProxyManager.disable_proxy()
+                    
+        except Exception as e:
+            print(f"启动状态检查失败: {e}")
 
+    def closeEvent(self, event):
+        """程序关闭时的清理工作"""
+        try:
+            print("🔄 程序关闭，正在清理资源...")
+            
+            # 停止所有定时器
+            if hasattr(self, 'proxy_timer'):
+                self.proxy_timer.stop()
+            if hasattr(self, 'ban_timer'):
+                self.ban_timer.stop()
+            if hasattr(self, 'token_renewal_timer'):
+                self.token_renewal_timer.stop()
+            if hasattr(self, 'active_account_refresh_timer'):
+                self.active_account_refresh_timer.stop()
+                
+            # 停止注册表监控
+            if hasattr(self, 'registry_manager') and self.registry_manager:
+                self.registry_manager.stop_monitoring()
+            
+            # 如果代理启用，停止代理服务（保留活跃账号信息）
+            if self.proxy_enabled:
+                print("🛑 停止代理服务...")
+                self.stop_proxy(clear_active_account=False)
+                
+            print("✅ 资源清理完成")
+            
+        except Exception as e:
+            print(f"清理资源时发生错误: {e}")
+        
+        # 接受关闭事件
+        event.accept()
 
     def init_ui(self):
         self.setWindowTitle(_('app_title'))
@@ -413,8 +474,8 @@ class MainWindow(QMainWindow):
         self.status_bar = QStatusBar()
         self.setStatusBar(self.status_bar)
 
-        # Add Ruwis link to right corner
-        self.ruwis_label = QLabel('<a href="https://github.com/D3-vin" style="color: #89b4fa; text-decoration: none; font-weight: bold;">https://github.com/D3-vin</a>')
+        # Add GitHub link to right corner
+        self.ruwis_label = QLabel('<a href="https://github.com/hj01857655/WARP_reg_and_manager" style="color: #89b4fa; text-decoration: none; font-weight: bold;">https://github.com/hj01857655/WARP_reg_and_manager</a>')
         self.ruwis_label.setOpenExternalLinks(True)
         self.ruwis_label.setStyleSheet("QLabel { padding: 2px 8px; }")
         self.status_bar.addPermanentWidget(self.ruwis_label)
@@ -633,7 +694,15 @@ class MainWindow(QMainWindow):
                     return  # Failed - error message already shown
             else:
                 # Proxy already active, just activate account
-                self.activate_account(email)
+                # 但在切换账号时，先停止代理再重新启动，确保控制台窗口正确关闭
+                self.show_status_message(f"Switching to {email}...", 2000)
+                # 停止代理但不清除活跃账号（之后会设置新的）
+                self.stop_proxy(clear_active_account=False)
+                # 重新启动代理并激活新账号
+                if self.start_proxy_and_activate_account(email):
+                    return  # Successful - operation completed
+                else:
+                    return  # Failed - error message already shown
 
     def show_context_menu(self, position):
         """Show right-click context menu"""
@@ -848,27 +917,13 @@ class MainWindow(QMainWindow):
         self.create_account_button.setEnabled(True)
         self.add_account_button.setEnabled(True)
         
-        # Check if it's a proxy error and show appropriate message
-        if "Proxy Error:" in error_message:
-            proxy_msg = error_message.replace("Proxy Error: ", "")
-            QMessageBox.warning(
-                self,
-                "Proxy Connection Error",
-                f"Failed to create account due to proxy issues:\n\n{proxy_msg}\n\n"
-                "💡 Suggestions:\n"
-                "• Check if proxy.txt contains valid proxies\n"
-                "• Try running without proxy (empty proxy.txt)\n"
-                "• Verify proxy authentication settings"
-            )
-            self.status_bar.showMessage(f"❌ Proxy error: {proxy_msg}", 8000)
-        else:
-            # General error handling
-            QMessageBox.critical(
-                self,
-                "Account Creation Error", 
-                f"Failed to create account:\n\n{error_message}"
-            )
-            self.status_bar.showMessage(f"❌ Error: {error_message}", 5000)
+        # General error handling
+        QMessageBox.critical(
+            self,
+            "Account Creation Error", 
+            f"Failed to create account:\n\n{error_message}"
+        )
+        self.status_bar.showMessage(f"❌ Error: {error_message}", 5000)
         
         self.account_creation_worker = None
 
@@ -1106,8 +1161,12 @@ class MainWindow(QMainWindow):
             print(f"Proxy config error: {e}")
             self.status_bar.showMessage(_('proxy_start_error').format(str(e)), 5000)
 
-    def stop_proxy(self):
-        """Stop proxy"""
+    def stop_proxy(self, clear_active_account=True):
+        """停止代理
+        
+        Args:
+            clear_active_account (bool): 是否清除活跃账号，默认True
+        """
         try:
             # Disable Windows proxy settings
             ProxyManager.disable_proxy()
@@ -1115,8 +1174,9 @@ class MainWindow(QMainWindow):
             # Stop Mitmproxy
             self.proxy_manager.stop()
 
-            # Clear active account
-            self.account_manager.clear_active_account()
+            # 根据参数决定是否清除活跃账号
+            if clear_active_account:
+                self.account_manager.clear_active_account()
 
             # Stop active account refresh timer
             if hasattr(self, 'active_account_refresh_timer') and self.active_account_refresh_timer.isActive():
@@ -2120,7 +2180,7 @@ class MainWindow(QMainWindow):
     def show_help_dialog(self):
         """Open Telegram for help"""
         import webbrowser
-        webbrowser.open("https://t.me/warp_account_manager_help")
+        webbrowser.open("https://t.me/warp5215")
 
     def refresh_ui_texts(self):
         """Update UI texts to English"""

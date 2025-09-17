@@ -12,6 +12,9 @@ import urllib3
 import re
 import random
 import string
+import logging
+import os
+from datetime import datetime
 from mitmproxy import http
 from mitmproxy.script import concurrent
 
@@ -31,6 +34,45 @@ except ImportError:
             return None
         def _(key):
             return key
+
+# Configure logging for warp responses
+def setup_warp_logging():
+    """Setup logging for warp.dev responses"""
+    log_dir = "logs"
+    if not os.path.exists(log_dir):
+        os.makedirs(log_dir)
+    
+    log_file = os.path.join(log_dir, f"warp_responses_{datetime.now().strftime('%Y%m%d')}.log")
+    
+    # Create logger
+    warp_logger = logging.getLogger('warp_responses')
+    warp_logger.setLevel(logging.INFO)
+    # 重要：防止日志消息传播到根logger，避免控制台输出
+    warp_logger.propagate = False
+    
+    # Remove existing handlers to avoid duplicates
+    for handler in warp_logger.handlers[:]:
+        warp_logger.removeHandler(handler)
+    
+    # Create file handler
+    file_handler = logging.FileHandler(log_file, encoding='utf-8')
+    file_handler.setLevel(logging.INFO)
+    
+    # Create formatter
+    formatter = logging.Formatter('%(asctime)s - %(message)s', datefmt='%Y-%m-%d %H:%M:%S')
+    file_handler.setFormatter(formatter)
+    
+    # Add handler to logger
+    warp_logger.addHandler(file_handler)
+    
+    return warp_logger
+
+# Initialize logger
+warp_logger = setup_warp_logging()
+
+def log_to_file(message):
+    """Log message to warp responses file only"""
+    warp_logger.info(message)
 
 # Hide SSL warnings
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
@@ -334,29 +376,20 @@ handler = WarpProxyHandler()
 def is_relevant_request(flow: http.HTTPFlow) -> bool:
     """Check if this request is relevant to us"""
 
-    # Skip Google/Firebase endpoints entirely to avoid TLS pinning issues
-    pinned_domains = [
-        "securetoken.googleapis.com",
-        ".googleapis.com",
-        ".gstatic.com",
-        ".google.com",
-    ]
-    if any(d in flow.request.pretty_host for d in pinned_domains):
-        return False
-
-    # Check Firebase token refresh requests by User-Agent and exclude them
-    if ("securetoken.googleapis.com" in flow.request.pretty_host and
-        flow.request.headers.get("User-Agent") == "WarpAccountManager/1.0"):
-        return False
-
     # Check and exclude requests from WarpAccountManager
     if flow.request.headers.get("x-warp-manager-request") == "true":
+        return False
+
+    # Check Firebase token refresh requests by User-Agent and exclude them from processing
+    if ("securetoken.googleapis.com" in flow.request.pretty_host and
+        flow.request.headers.get("User-Agent") == "WarpAccountManager/1.0"):
         return False
 
     # Process only specific domains
     relevant_domains = [
         "app.warp.dev",
-        "dataplane.rudderstack.com"  # For blocking
+        "dataplane.rudderstack.com",  # For blocking
+        "sentry.io"  # For blocking
     ]
 
     # Silently pass requests not related to Warp (don't block internet access)
@@ -385,6 +418,16 @@ def request(flow: http.HTTPFlow) -> None:
         )
         return
     
+    # Block requests to *.sentry.io (error reporting service)
+    if "sentry.io" in flow.request.pretty_host:
+        print(f"🚫 Blocked Sentry request: {request_url}")
+        flow.response = http.Response.make(
+            204,  # No Content
+            b"",
+            {"Content-Type": "text/plain"}
+        )
+        return
+    
     # Block requests to app.warp.dev/analytics/block (analytics collection)
     if "app.warp.dev" in flow.request.pretty_host and "/analytics/block" in flow.request.path:
         print(f"🚫 Blocked Warp analytics request: {request_url}")
@@ -395,37 +438,38 @@ def request(flow: http.HTTPFlow) -> None:
         )
         return
 
-    print(f"🌐 Warp Request: {flow.request.method} {flow.request.pretty_url}")
-    
-    # Print detailed request information for all app.warp.dev requests
-    print(f"\n=== WARP REQUEST DETAILS ===")
-    print(f"URL: {flow.request.pretty_url}")
-    print(f"Method: {flow.request.method}")
-    print(f"Path: {flow.request.path}")
-    print(f"Request Headers:")
-    for header_name, header_value in flow.request.headers.items():
-        if 'experiment' in header_name.lower() or 'authorization' in header_name.lower() or 'warp' in header_name.lower() or header_name.lower() in ['content-type', 'user-agent']:
-            if 'authorization' in header_name.lower():
-                print(f"  {header_name}: Bearer ...{str(header_value)[-20:] if len(str(header_value)) > 20 else header_value}")
-            else:
-                print(f"  {header_name}: {header_value}")
-    
-    # Print request body for POST requests
-    if flow.request.method == "POST" and flow.request.content:
-        try:
-            content_type = flow.request.headers.get("content-type", "")
-            if "application/json" in content_type.lower():
-                request_text = flow.request.content.decode('utf-8', errors='replace')
-                if len(request_text) > 1500:
-                    print(f"Request Body (first 1500 chars): {request_text[:1500]}...")
+    # Log detailed request information to file only (no console output)
+    if "app.warp.dev" in flow.request.pretty_host:
+        log_to_file("=== REQUEST DETAILS ===")
+        log_to_file(f"URL: {flow.request.pretty_url}")
+        log_to_file(f"Method: {flow.request.method}")
+        log_to_file(f"Path: {flow.request.path}")
+        log_to_file(f"Host: {flow.request.pretty_host}")
+        log_to_file("Request Headers:")
+        for header_name, header_value in flow.request.headers.items():
+            if ('experiment' in header_name.lower() or 'authorization' in header_name.lower() or 
+                'warp' in header_name.lower() or header_name.lower() in ['content-type', 'user-agent']):
+                if 'authorization' in header_name.lower():
+                    log_to_file(f"  {header_name}: Bearer ...{str(header_value)[-20:] if len(str(header_value)) > 20 else header_value}")
                 else:
-                    print(f"Request Body: {request_text}")
-            else:
-                print(f"Request Body: [Binary data - {len(flow.request.content)} bytes]")
-        except Exception as e:
-            print(f"Error reading request content: {e}")
-    
-    print(f"=== END WARP REQUEST ===")
+                    log_to_file(f"  {header_name}: {header_value}")
+        
+        # Log request body for POST requests
+        if flow.request.method == "POST" and flow.request.content:
+            try:
+                content_type = flow.request.headers.get("content-type", "")
+                if "application/json" in content_type.lower():
+                    request_text = flow.request.content.decode('utf-8', errors='replace')
+                    if len(request_text) > 1500:
+                        log_to_file(f"Request Body (first 1500 chars): {request_text[:1500]}...")
+                    else:
+                        log_to_file(f"Request Body: {request_text}")
+                else:
+                    log_to_file(f"Request Body: [Binary data - {len(flow.request.content)} bytes]")
+            except Exception as e:
+                log_to_file(f"Error reading request content: {e}")
+        
+        log_to_file("=== END REQUEST ===")
 
     # Detect CreateGenericStringObject request - trigger user_settings.json update
     if ("/graphql/v2?op=CreateGenericStringObject" in request_url and
@@ -502,13 +546,9 @@ def responseheaders(flow: http.HTTPFlow) -> None:
 def response(flow: http.HTTPFlow) -> None:
     """Executed when response is received"""
 
-    # Check Firebase token refresh requests by User-Agent and exclude them
+    # Check Firebase token refresh requests by User-Agent and exclude them from processing
     if ("securetoken.googleapis.com" in flow.request.pretty_host and
         flow.request.headers.get("User-Agent") == "WarpAccountManager/1.0"):
-        return
-
-    # Process only specific domains
-    if "app.warp.dev" not in flow.request.pretty_host:
         return
 
     # Immediately filter unimportant requests - pass silently (don't interfere with internet access)
@@ -519,84 +559,91 @@ def response(flow: http.HTTPFlow) -> None:
     if flow.request.headers.get("x-warp-manager-request") == "true":
         return
 
-    print(f"📡 Warp Response: {flow.response.status_code} - {flow.request.pretty_url}")
-    
-    # Print detailed response information for all app.warp.dev requests
-    print(f"\n=== WARP RESPONSE DETAILS ===")
-    print(f"URL: {flow.request.pretty_url}")
-    print(f"Method: {flow.request.method}")
-    print(f"Status: {flow.response.status_code}")
-    print(f"Response Headers:")
-    for header_name, header_value in flow.response.headers.items():
-        print(f"  {header_name}: {header_value}")
-    
-    # Print request headers for context
-    print(f"Request Headers:")
-    for header_name, header_value in flow.request.headers.items():
-        if 'experiment' in header_name.lower() or 'authorization' in header_name.lower() or 'warp' in header_name.lower():
-            print(f"  {header_name}: {header_value[:50]}{'...' if len(str(header_value)) > 50 else ''}")
-    
-    # Print response content (with size limit for readability)
-    try:
-        content_type = flow.response.headers.get("content-type", "")
-        if "application/json" in content_type.lower():
-            response_text = flow.response.content.decode('utf-8', errors='replace')
-            if len(response_text) > 2000:
-                print(f"Response Content (first 2000 chars): {response_text[:2000]}...")
-                print(f"Response Content (last 500 chars): ...{response_text[-500:]}")
-            else:
-                print(f"Response Content: {response_text}")
-        elif "text/" in content_type.lower():
-            response_text = flow.response.content.decode('utf-8', errors='replace')
-            if len(response_text) > 1000:
-                print(f"Response Content (first 1000 chars): {response_text[:1000]}...")
-            else:
-                print(f"Response Content: {response_text}")
-        else:
-            print(f"Response Content: [Binary data - {len(flow.response.content)} bytes]")
-    except Exception as e:
-        print(f"Error reading response content: {e}")
-    
-    print(f"=== END WARP RESPONSE ===")
-
-    # Use cached response for GetUpdatedCloudObjects request
-    if ("/graphql/v2?op=GetUpdatedCloudObjects" in flow.request.pretty_url and
-        flow.request.method == "POST" and
-        flow.response.status_code == 200 and
-        handler.user_settings_cache is not None):
-        print("🔄 GetUpdatedCloudObjects response being replaced with cached data...")
+    # Log detailed response information to file only (no console output)
+    if "app.warp.dev" in flow.request.pretty_host:
+        log_to_file("=== RESPONSE DETAILS ===")
+        log_to_file(f"URL: {flow.request.pretty_url}")
+        log_to_file(f"Method: {flow.request.method}")
+        log_to_file(f"Status: {flow.response.status_code}")
+        log_to_file(f"Host: {flow.request.pretty_host}")
+        log_to_file("Response Headers:")
+        for header_name, header_value in flow.response.headers.items():
+            log_to_file(f"  {header_name}: {header_value}")
+        
+        # Log request headers for context
+        log_to_file("Request Headers (context):")
+        for header_name, header_value in flow.request.headers.items():
+            if ('experiment' in header_name.lower() or 'authorization' in header_name.lower() or 
+                'warp' in header_name.lower() or header_name.lower() in ['content-type', 'user-agent']):
+                value_preview = f"{header_value[:50]}{'...' if len(str(header_value)) > 50 else ''}"
+                if 'authorization' in header_name.lower():
+                    value_preview = f"Bearer ...{str(header_value)[-20:] if len(str(header_value)) > 20 else header_value}"
+                log_to_file(f"  {header_name}: {value_preview}")
+        
+        # Log response content (with size limit for readability)
         try:
-            # Convert cached data to JSON string
-            cached_response = json.dumps(handler.user_settings_cache, ensure_ascii=False)
-
-            # Modify Response
-            flow.response.content = cached_response.encode('utf-8')
-            flow.response.headers["Content-Length"] = str(len(flow.response.content))
-            flow.response.headers["Content-Type"] = "application/json"
-
-            print("✅ GetUpdatedCloudObjects response successfully modified")
+            content_type = flow.response.headers.get("content-type", "")
+            if "application/json" in content_type.lower():
+                response_text = flow.response.content.decode('utf-8', errors='replace')
+                if len(response_text) > 2000:
+                    log_to_file(f"Response Content (first 2000 chars): {response_text[:2000]}...")
+                    log_to_file(f"Response Content (last 500 chars): ...{response_text[-500:]}")
+                else:
+                    log_to_file(f"Response Content: {response_text}")
+            elif "text/" in content_type.lower():
+                response_text = flow.response.content.decode('utf-8', errors='replace')
+                if len(response_text) > 1000:
+                    log_to_file(f"Response Content (first 1000 chars): {response_text[:1000]}...")
+                else:
+                    log_to_file(f"Response Content: {response_text}")
+            else:
+                log_to_file(f"Response Content: [Binary data - {len(flow.response.content)} bytes]")
         except Exception as e:
-            print(f"❌ Error modifying response: {e}")
+            log_to_file(f"Error reading response content: {e}")
+        
+        log_to_file("=== END RESPONSE ===")
 
-    # 403 error in /ai/multi-agent endpoint - immediate account ban
-    if "/ai/multi-agent" in flow.request.path and flow.response.status_code == 403:
-        print("⛔ 403 FORBIDDEN - Account ban detected!")
-        if handler.active_email:
-            print(f"Banned account: {handler.active_email}")
-            handler.mark_account_as_banned(handler.active_email)
-        else:
-            print("Active account not found, ban not marked")
+    # app.warp.dev specific processing only
+    if "app.warp.dev" in flow.request.pretty_host:
+        # Use cached response for GetUpdatedCloudObjects request
+        if ("/graphql/v2?op=GetUpdatedCloudObjects" in flow.request.pretty_url and
+            flow.request.method == "POST" and
+            flow.response.status_code == 200 and
+            handler.user_settings_cache is not None):
+            print("🔄 GetUpdatedCloudObjects response being replaced with cached data...")
+            try:
+                # Convert cached data to JSON string
+                cached_response = json.dumps(handler.user_settings_cache, ensure_ascii=False)
 
-    # If 401 error received, try to refresh token
-    if flow.response.status_code == 401:
-        print("401 error received, refreshing token...")
-        if handler.update_active_token():
-            print("Token refreshed, retry request")
+                # Modify Response
+                flow.response.content = cached_response.encode('utf-8')
+                flow.response.headers["Content-Length"] = str(len(flow.response.content))
+                flow.response.headers["Content-Type"] = "application/json"
+
+                print("✅ GetUpdatedCloudObjects response successfully modified")
+            except Exception as e:
+                print(f"❌ Error modifying response: {e}")
+
+        # 403 error in /ai/multi-agent endpoint - immediate account ban
+        if "/ai/multi-agent" in flow.request.path and flow.response.status_code == 403:
+            print("⛔ 403 FORBIDDEN - Account ban detected!")
+            if handler.active_email:
+                print(f"Banned account: {handler.active_email}")
+                handler.mark_account_as_banned(handler.active_email)
+            else:
+                print("Active account not found, ban not marked")
+
+        # If 401 error received, try to refresh token
+        if flow.response.status_code == 401:
+            print("401 error received, refreshing token...")
+            if handler.update_active_token():
+                print("Token refreshed, retry request")
 
 # Load active account on startup
 def load(loader):
     """Executed when script starts"""
     print("Warp Proxy Script started")
+    print(f"📝 app.warp.dev requests/responses will be logged to: logs/warp_responses_{datetime.now().strftime('%Y%m%d')}.log")
     print("Checking database connection...")
     handler.update_active_token()
     if handler.active_email:

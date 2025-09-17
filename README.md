@@ -1,10 +1,12 @@
 # Warp Account Registrator & Manager
 
+> **📝 Note**: This project is forked from [D3-vin/WARP_reg_and_manager](https://github.com/D3-vin/WARP_reg_and_manager)
+
 ## 📢 Connect with Us
 
-- **📢 Channel**: [https://t.me/D3_vin](https://t.me/D3_vin) - Latest updates and releases
-- **💬 Chat**: [https://t.me/D3vin_chat](https://t.me/D3vin_chat) - Community support and discussions
-- **📁 GitHub**: [https://github.com/D3-vin](https://github.com/D3-vin) - Source code and development
+- **📢 Channel**: [https://t.me/warp5215](https://t.me/warp5215) - Latest updates and releases
+- **💬 Chat**: [https://t.me/warp1215](https://t.me/warp1215) - Community support and discussions
+- **📁 GitHub**: [https://github.com/hj01857655/WARP_reg_and_manager](https://github.com/hj01857655/WARP_reg_and_manager) - Source code and development
 
 ![Python](https://img.shields.io/badge/Python-3.6+-blue)
 ![Platform](https://img.shields.io/badge/Platform-Windows%20%7C%20macOS%20%7C%20Linux-lightgrey)

@@ -85,7 +85,7 @@ class WarpRegistryManager:
             print(f"读取注册表值 {value_name} 失败: {e}")
             return None
     
-    def set_registry_value(self, value_name: str, value: Any, reg_type: int = winreg.REG_DWORD) -> bool:
+    def set_registry_value(self, value_name: str, value: Any, reg_type: int = winreg.REG_SZ, silent: bool = False) -> bool:
         """设置注册表值"""
         try:
             key = self._open_warp_registry_key(winreg.KEY_WRITE)
@@ -94,7 +94,8 @@ class WarpRegistryManager:
                 
             winreg.SetValueEx(key, value_name, 0, reg_type, value)
             winreg.CloseKey(key)
-            print(f"✅ 注册表值已更新: {value_name} = {value}")
+            if not silent:
+                print(f"✅ 注册表值已更新: {value_name} = {value}")
             return True
             
         except Exception as e:
@@ -113,10 +114,10 @@ class WarpRegistryManager:
         try:
             current_value = self.get_registry_value("ReverseProTrialModalDismissed")
             
-            # Windows注册表中，布尔值通常存储为DWORD: 0=false, 1=true
+            # Warp应用中，ReverseProTrialModalDismissed使用REG_SZ格式存储: "false"/"true"
             if current_value == 1 or str(current_value).lower() == 'true':
                 print("⚠️ 检测到ReverseProTrialModalDismissed为true，正在修正...")
-                success = self.set_registry_value("ReverseProTrialModalDismissed", 0, winreg.REG_DWORD)
+                success = self.set_registry_value("ReverseProTrialModalDismissed", "false", winreg.REG_SZ)
                 if success:
                     print("✅ ReverseProTrialModalDismissed已重置为false")
                     return True
@@ -124,16 +125,16 @@ class WarpRegistryManager:
                     print("❌ 修正ReverseProTrialModalDismissed失败")
                     return False
             elif current_value == 0 or str(current_value).lower() == 'false':
-                print("✅ ReverseProTrialModalDismissed状态正常 (false)")
+                # 状态正常，不打印信息
                 return True
             elif current_value is None:
                 # 如果值不存在，设置为false
                 print("🔧 ReverseProTrialModalDismissed不存在，设置为false...")
-                return self.set_registry_value("ReverseProTrialModalDismissed", 0, winreg.REG_DWORD)
+                return self.set_registry_value("ReverseProTrialModalDismissed", "false", winreg.REG_SZ)
             else:
                 # 尝试强制设置为false
                 print(f"⚠️ ReverseProTrialModalDismissed值异常: {current_value}，强制设置为false")
-                return self.set_registry_value("ReverseProTrialModalDismissed", 0, winreg.REG_DWORD)
+                return self.set_registry_value("ReverseProTrialModalDismissed", "false", winreg.REG_SZ)
                 
         except Exception as e:
             print(f"检查ReverseProTrialModalDismissed失败: {e}")
@@ -144,10 +145,10 @@ class WarpRegistryManager:
         try:
             current_value = self.get_registry_value("TelemetryEnabled")
             
-            # Windows注册表中，布尔值通常存储为DWORD: 0=false, 1=true
+            # Warp应用中，TelemetryEnabled使用REG_SZ格式存储: "false"/"true"
             if current_value == 1 or str(current_value).lower() == 'true':
                 print("⚠️ 检测到TelemetryEnabled为true，正在修正...")
-                success = self.set_registry_value("TelemetryEnabled", 0, winreg.REG_DWORD)
+                success = self.set_registry_value("TelemetryEnabled", "false", winreg.REG_SZ)
                 if success:
                     print("✅ TelemetryEnabled已重置为false")
                     return True
@@ -155,16 +156,16 @@ class WarpRegistryManager:
                     print("❌ 修正TelemetryEnabled失败")
                     return False
             elif current_value == 0 or str(current_value).lower() == 'false':
-                print("✅ TelemetryEnabled状态正常 (false)")
+                # 状态正常，不打印信息
                 return True
             elif current_value is None:
                 # 如果值不存在，设置为false
                 print("🔧 TelemetryEnabled不存在，设置为false...")
-                return self.set_registry_value("TelemetryEnabled", 0, winreg.REG_DWORD)
+                return self.set_registry_value("TelemetryEnabled", "false", winreg.REG_SZ)
             else:
                 # 尝试强制设置为false
                 print(f"⚠️ TelemetryEnabled值异常: {current_value}，强制设置为false")
-                return self.set_registry_value("TelemetryEnabled", 0, winreg.REG_DWORD)
+                return self.set_registry_value("TelemetryEnabled", "false", winreg.REG_SZ)
                 
         except Exception as e:
             print(f"检查TelemetryEnabled失败: {e}")

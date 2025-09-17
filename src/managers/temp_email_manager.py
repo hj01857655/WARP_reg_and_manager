@@ -17,92 +17,21 @@ except ImportError:
     CURL_CFFI_AVAILABLE = False
 
 
-class ProxyManager:
-    """Manager for proxy configuration from proxy.txt file"""
-    
-    def __init__(self, proxy_file: str = "proxy.txt"):
-        self.proxy_file = proxy_file
-        self.proxies = []
-        self.current_proxy_index = 0
-        self.load_proxies()
-    
-    def load_proxies(self) -> None:
-        """Load proxies from file"""
-        try:
-            if os.path.exists(self.proxy_file):
-                with open(self.proxy_file, 'r', encoding='utf-8') as f:
-                    lines = f.readlines()
-                    
-                self.proxies = []
-                for line in lines:
-                    line = line.strip()
-                    if line and not line.startswith('#'):
-                        self.proxies.append(line)
-                        
-                logging.info(f"Loaded {len(self.proxies)} proxies from {self.proxy_file}")
-            else:
-                logging.warning(f"File {self.proxy_file} not found, working without proxy")
-                
-        except Exception as e:
-            logging.error(f"Error loading proxies: {e}")
-            self.proxies = []
-    
-    def get_random_proxy(self) -> Optional[str]:
-        """Get random proxy from list"""
-        if not self.proxies:
-            return None
-        return random.choice(self.proxies)
-    
-    def get_next_proxy(self) -> Optional[str]:
-        """Get next proxy in rotation"""
-        if not self.proxies:
-            return None
-            
-        proxy = self.proxies[self.current_proxy_index]
-        self.current_proxy_index = (self.current_proxy_index + 1) % len(self.proxies)
-        return proxy
-    
-    def parse_proxy(self, proxy_string: str) -> Dict[str, str]:
-        """Parse proxy string into curl_cffi format"""
-        try:
-            # Support formats:
-            # http://user:pass@host:port
-            # https://user:pass@host:port  
-            # socks5://user:pass@host:port
-            # user:pass@host:port (default http)
-            # host:port (no authentication)
-            
-            if '://' not in proxy_string:
-                # Add http:// by default
-                proxy_string = f"http://{proxy_string}"
-            
-            # For curl_cffi proxy is passed as string
-            return {"proxies": {"http": proxy_string, "https": proxy_string}}
-            
-        except Exception as e:
-            logging.error(f"Error parsing proxy {proxy_string}: {e}")
-            return {}
-    
-    def has_proxies(self) -> bool:
-        """Check if proxies are available"""
-        return len(self.proxies) > 0
+# ProxyManager类已移除 - 不再需要代理池支持
 
 
 class TempEmailManager:
     """Manager for temporary email operations using tmailor.com API"""
     
-    def __init__(self, proxy_file: str = "proxy.txt"):
+    def __init__(self):
         self.session: Optional[object] = None
-        self.proxy_manager = ProxyManager(proxy_file)
         self.api_url = "https://tmailor.com/api"
+        print("📧 TempEmailManager initialized - working without proxy pool")
         
     async def __aenter__(self):
         """Async context manager entry"""
         if CURL_CFFI_AVAILABLE:
-            # Get random proxy
-            proxy = self.proxy_manager.get_random_proxy()
-            
-            # Configuration for curl_cffi
+            # Configuration for curl_cffi - 直接连接，不使用代理
             session_config = {
                 'verify': False,  # Disable SSL verification
                 'timeout': 30,    # Set timeout
@@ -119,12 +48,6 @@ class TempEmailManager:
                     'Sec-Fetch-Site': 'same-origin'
                 }
             }
-            
-            if proxy:
-                proxy_config = self.proxy_manager.parse_proxy(proxy)
-                session_config.update(proxy_config)
-            else:
-                logging.info("Working without proxy")
                 
             self.session = AsyncSession(**session_config)
         else:
@@ -182,26 +105,22 @@ class TempEmailManager:
                 
                 # Check for Cloudflare protection (403 with "Just a moment" page)
                 if response.status_code == 403 and "Just a moment" in response.text:
-                    raise Exception(f"Proxy blocked by Cloudflare protection. Please try a different proxy from proxy.txt.")
+                    raise Exception(f"Request blocked by Cloudflare protection. Please try again later.")
                 elif response.status_code == 403:
-                    raise Exception(f"Access forbidden (403). This proxy may be blocked. Please try a different proxy.")
+                    raise Exception(f"Access forbidden (403). Service may be temporarily unavailable.")
                     
                 return None
                 
         except Exception as e:
             logging.error(f"Error creating temp email: {e}")
             error_msg = str(e)
-            # Check for specific proxy errors and provide better user feedback
-            if "response 407" in error_msg or "CONNECT tunnel failed" in error_msg:
-                raise Exception(f"Proxy authentication failed (407). Please check proxy credentials or try a different proxy.")
-            elif "Failed to perform, curl:" in error_msg and "(56)" in error_msg:
-                raise Exception(f"Proxy connection failed. Please try a different proxy from proxy.txt.")
-            elif "Connection refused" in error_msg:
-                raise Exception(f"Proxy server refused connection. Please try a different proxy.")
+            # 简化错误处理，移除代理相关错误
+            if "Connection refused" in error_msg:
+                raise Exception(f"Connection refused. Service may be temporarily unavailable.")
             elif "403" in error_msg and ("Just a moment" in error_msg or "Cloudflare" in error_msg):
-                raise Exception(f"Proxy blocked by Cloudflare protection. Please try a different proxy from proxy.txt.")
+                raise Exception(f"Request blocked by Cloudflare protection. Please try again later.")
             elif "403" in error_msg:
-                raise Exception(f"Access forbidden (403). This proxy may be blocked. Please try a different proxy.")
+                raise Exception(f"Access forbidden (403). Service may be temporarily unavailable.")
             else:
                 raise Exception(f"Email service error: {error_msg}")
             return None
@@ -300,26 +219,22 @@ class TempEmailManager:
                 
                 # Check for Cloudflare protection (403 with "Just a moment" page)
                 if response.status_code == 403 and "Just a moment" in response.text:
-                    raise Exception(f"Proxy blocked by Cloudflare protection. Please try a different proxy from proxy.txt.")
+                    raise Exception(f"Request blocked by Cloudflare protection. Please try again later.")
                 elif response.status_code == 403:
-                    raise Exception(f"Access forbidden (403). This proxy may be blocked. Please try a different proxy.")
+                    raise Exception(f"Access forbidden (403). Service may be temporarily unavailable.")
                     
                 return None
                 
         except Exception as e:
             logging.error(f"Error getting messages: {e}")
             error_msg = str(e)
-            # Check for specific proxy errors
-            if "response 407" in error_msg or "CONNECT tunnel failed" in error_msg:
-                raise Exception(f"Proxy authentication failed (407). Please check proxy credentials or try a different proxy.")
-            elif "Failed to perform, curl:" in error_msg and "(56)" in error_msg:
-                raise Exception(f"Proxy connection failed. Please try a different proxy from proxy.txt.")
-            elif "Connection refused" in error_msg:
-                raise Exception(f"Proxy server refused connection. Please try a different proxy.")
+            # 简化错误处理，移除代理相关错误
+            if "Connection refused" in error_msg:
+                raise Exception(f"Connection refused. Service may be temporarily unavailable.")
             elif "403" in error_msg and ("Just a moment" in error_msg or "Cloudflare" in error_msg):
-                raise Exception(f"Proxy blocked by Cloudflare protection. Please try a different proxy from proxy.txt.")
+                raise Exception(f"Request blocked by Cloudflare protection. Please try again later.")
             elif "403" in error_msg:
-                raise Exception(f"Access forbidden (403). This proxy may be blocked. Please try a different proxy.")
+                raise Exception(f"Access forbidden (403). Service may be temporarily unavailable.")
             else:
                 raise Exception(f"Email service error: {error_msg}")
             return None
@@ -331,7 +246,7 @@ class TempEmailManager:
             await asyncio.sleep(0.5)
             return {
                 "content": "Sign in to Warp\n\nClick the link below to sign in to your account:\n\nhttps://astral-field-294621.firebaseapp.com/__/auth/action?apiKey=AIzaSyBdy3O3S9hrdayLJxJ7mriBR4qgUaUygAs&mode=signIn&oobCode=test_code_123456&continueUrl=https://app.warp.dev/login?redirect_to%3D/teams_discovery&lang=en\n\nIf you didn't request this, you can ignore this email.",
-                "html": "\u003Cp\u003EHello,\u003C\/p\u003E\r\n\u003Cp\u003EWe received a request to sign in to Warp using this email address. If you want to sign in, click this link:\u003C\/p\u003E\r\n\u003Cp\u003E\u003Ca href=\u0027https:\/\/astral-field-294621.firebaseapp.com\/__\/auth\/action?apiKey=AIzaSyBdy3O3S9hrdayLJxJ7mriBR4qgUaUygAs\u0026amp;mode=signIn\u0026amp;oobCode=test_code_123456\u0026amp;continueUrl=https:\/\/app.warp.dev\/login?redirect_to%3D\/teams_discovery\u0026amp;lang=en\u0027\u003ESign in to Warp\u003C\/a\u003E\u003C\/p\u003E",
+                "html": r"\u003Cp\u003EHello,\u003C\/p\u003E\r\n\u003Cp\u003EWe received a request to sign in to Warp using this email address. If you want to sign in, click this link:\u003C\/p\u003E\r\n\u003Cp\u003E\u003Ca href=\u0027https:\/\/astral-field-294621.firebaseapp.com\/__\/auth\/action?apiKey=AIzaSyBdy3O3S9hrdayLJxJ7mriBR4qgUaUygAs\u0026amp;mode=signIn\u0026amp;oobCode=test_code_123456\u0026amp;continueUrl=https:\/\/app.warp.dev\/login?redirect_to%3D\/teams_discovery\u0026amp;lang=en\u0027\u003ESign in to Warp\u003C\/a\u003E\u003C\/p\u003E",
                 "subject": "Sign in to Warp",
                 "from": "noreply@auth.app.warp.dev"
             }
@@ -438,29 +353,13 @@ class TempEmailManager:
         return None
 
 
-async def create_temporary_email(proxy_file: str = "proxy.txt") -> Optional[Dict[str, str]]:
-    """Convenience function to create temporary email with proxy support"""
-    async with TempEmailManager(proxy_file) as manager:
+async def create_temporary_email() -> Optional[Dict[str, str]]:
+    """Convenience function to create temporary email"""
+    async with TempEmailManager() as manager:
         return await manager.create_temp_email()
 
 
-async def create_temporary_email_with_proxy(proxy: str = None) -> Optional[Dict[str, str]]:
-    """Create temporary email with specific proxy"""
-    if proxy and CURL_CFFI_AVAILABLE:
-        # Create manager with specific proxy
-        proxy_manager = ProxyManager()
-        proxy_config = proxy_manager.parse_proxy(proxy)
-        
-        session = AsyncSession(**proxy_config)
-        try:
-            manager = TempEmailManager()
-            manager.session = session
-            return await manager.create_temp_email()
-        finally:
-            await session.close()
-    else:
-        # Use standard method
-        return await create_temporary_email()
+# create_temporary_email_with_proxy 函数已移除 - 不再需要代理支持
 
 
 if __name__ == "__main__":

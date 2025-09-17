@@ -130,6 +130,9 @@ class MitmProxyManager:
                 "--set", "keep_host_header=true",    # Keep host header
                 # Be conservative with protocols to avoid handshake bugs
                 "--set", "http2=false",
+                # 减少控制台日志输出
+                "--set", "console_eventlog_verbosity=error",  # 只显示错误
+                "--set", "flow_detail=0",  # 不显示请求详细信息
                 # Avoid TLS interception for known pinned/Google endpoints to prevent resets
                 "--ignore-hosts", r"^(?:[a-zA-Z0-9-]+\.)?googleapis\.com$",
                 "--ignore-hosts", r"^(?:[a-zA-Z0-9-]+\.)?gstatic\.com$",
@@ -143,18 +146,19 @@ class MitmProxyManager:
                 cmd_str = ' '.join(f'"{arg}"' if ' ' in arg else arg for arg in cmd)
 
                 if self.debug_mode:
-                    # Debug mode: Console window visible
+                    # Debug mode: Console window visible，使用/c而不是/k，这样关闭时会一起关闭
                     print("Debug mode active - Mitmproxy console window will open")
+                    # 使用 subprocess.Popen 直接启动，不通过 start 命令
                     self.process = subprocess.Popen(
-                        f'start "Mitmproxy Console (Debug)" cmd /k "{cmd_str}"',
-                        shell=True
+                        cmd,  # 直接使用命令数组
+                        creationflags=subprocess.CREATE_NEW_CONSOLE,  # 创建新控制台窗口
+                        cwd=os.getcwd()  # 设置工作目录
                     )
                 else:
                     # Normal mode: Hidden console window
                     print("Normal mode - Mitmproxy will run in background")
                     self.process = subprocess.Popen(
-                        cmd_str,
-                        shell=True,
+                        cmd,  # 直接使用命令数组
                         creationflags=subprocess.CREATE_NO_WINDOW
                     )
 
@@ -378,26 +382,66 @@ class MitmProxyManager:
     def stop(self):
         """Stop Mitmproxy"""
         try:
+            stopped = False
+            
+            # 先尝试停止主进程
             if self.process and self.process.poll() is None:
-                self.process.terminate()
-                self.process.wait(timeout=10)
-                print("Mitmproxy остановлен")
-                return True
+                try:
+                    # Windows下使用terminate()可能不够，先尝试温和停止
+                    if sys.platform == "win32":
+                        self.process.terminate()
+                        # 等待进程结束，如果超时则强制杀死
+                        try:
+                            self.process.wait(timeout=5)
+                        except subprocess.TimeoutExpired:
+                            # 强制杀死进程
+                            self.process.kill()
+                            self.process.wait(timeout=3)
+                    else:
+                        self.process.terminate()
+                        self.process.wait(timeout=10)
+                    
+                    print("Mitmproxy 停止成功")
+                    stopped = True
+                except subprocess.TimeoutExpired:
+                    print("警告：Mitmproxy 进程停止超时")
+                except Exception as e:
+                    print(f"停止主进程失败: {e}")
 
-            # If no process reference, find by PID and stop
+            # 查找并停止所有相关的mitmdump进程
+            killed_processes = []
             for proc in psutil.process_iter(['pid', 'name', 'cmdline']):
                 try:
-                    if 'mitmdump' in proc.info['name'] and str(self.port) in ' '.join(proc.info['cmdline']):
+                    proc_info = proc.info
+                    if ('mitmdump' in proc_info['name'] and 
+                        proc_info['cmdline'] and 
+                        str(self.port) in ' '.join(proc_info['cmdline'])):
+                        
                         proc.terminate()
-                        proc.wait(timeout=10)
-                        print(f"Mitmproxy остановлен (PID: {proc.info['pid']})")
-                        return True
-                except:
+                        try:
+                            proc.wait(timeout=5)
+                            killed_processes.append(proc_info['pid'])
+                        except psutil.TimeoutExpired:
+                            # 强制杀死
+                            proc.kill()
+                            killed_processes.append(proc_info['pid'])
+                        stopped = True
+                except (psutil.NoSuchProcess, psutil.AccessDenied):
                     continue
-
+                except Exception as e:
+                    print(f"停止进程 {proc_info.get('pid', 'unknown')} 失败: {e}")
+                    continue
+            
+            if killed_processes:
+                print(f"Mitmproxy 进程已停止 (PIDs: {', '.join(map(str, killed_processes))})")
+            
+            # 重置状态
+            self.process = None
+            self._terminal_opened = False
+            
             return True
         except Exception as e:
-            print(f"Ошибка остановки Mitmproxy: {e}")
+            print(f"停止Mitmproxy时发生错误: {e}")
             return False
 
     def is_running(self):
