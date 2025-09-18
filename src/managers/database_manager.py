@@ -146,13 +146,13 @@ class DatabaseManager:
             return False, f"Unexpected error: {e}"
 
     def get_accounts(self) -> List[Tuple[str, str]]:
-        """Get all accounts (email, account_data) sorted by creation date"""
+        """Get all accounts (email, account_data) sorted by creation date (earliest first)"""
         conn = sqlite3.connect(self.db_path)
         cursor = conn.cursor()
         
         # Check if created_at column exists
         try:
-            cursor.execute('SELECT email, account_data FROM accounts ORDER BY created_at DESC')
+            cursor.execute('SELECT email, account_data FROM accounts ORDER BY created_at ASC')
         except sqlite3.OperationalError:
             # Fallback to email sorting if created_at doesn't exist
             cursor.execute('SELECT email, account_data FROM accounts ORDER BY email')
@@ -162,13 +162,13 @@ class DatabaseManager:
         return accounts
 
     def get_accounts_with_health(self) -> List[Tuple[str, str, str]]:
-        """Get all accounts with health status (email, account_data, health_status) sorted by creation date"""
+        """Get all accounts with health status (email, account_data, health_status) sorted by creation date (earliest first)"""
         conn = sqlite3.connect(self.db_path)
         cursor = conn.cursor()
         
         # Check if created_at column exists
         try:
-            cursor.execute('SELECT email, account_data, health_status FROM accounts ORDER BY created_at DESC')
+            cursor.execute('SELECT email, account_data, health_status FROM accounts ORDER BY created_at ASC')
         except sqlite3.OperationalError:
             # Fallback to email sorting if created_at doesn't exist
             cursor.execute('SELECT email, account_data, health_status FROM accounts ORDER BY email')
@@ -178,13 +178,13 @@ class DatabaseManager:
         return accounts
 
     def get_accounts_with_health_and_limits(self) -> List[Tuple[str, str, str, str]]:
-        """Get all accounts with health status and limits (email, account_data, health_status, limit_info) sorted by creation date"""
+        """Get all accounts with health status and limits (email, account_data, health_status, limit_info) sorted by creation date (earliest first)"""
         conn = sqlite3.connect(self.db_path)
         cursor = conn.cursor()
         
         # Check if created_at column exists
         try:
-            cursor.execute('SELECT email, account_data, health_status, limit_info FROM accounts ORDER BY created_at DESC')
+            cursor.execute('SELECT email, account_data, health_status, limit_info FROM accounts ORDER BY created_at ASC')
         except sqlite3.OperationalError:
             # Fallback to email sorting if created_at doesn't exist
             cursor.execute('SELECT email, account_data, health_status, limit_info FROM accounts ORDER BY email')

@@ -174,9 +174,13 @@ class ActiveAccountRefreshWorker(QThread):
                         print(f"✅ Active account limit updated: {email} - {limit_text}")
                         
                         # Check if account has reached limit and auto-switch
-                        print(f"🔍 Checking limit: used={used}, total={total}, should_switch={used >= total and total > 0}")
-                        if used >= total and total > 0:
-                            print(f"⚠️ Account {email} has reached its limit ({used}/{total})")
+                        # 提前切换：当使用量达到147/150时就切换，避免30秒检查间隔的延迟
+                        switch_threshold = 147  # 提前切换阈值
+                        should_switch = (used >= switch_threshold and total == 150) or (used >= total and total > 0)
+                        print(f"🔍 Checking limit: used={used}, total={total}, threshold={switch_threshold}, should_switch={should_switch}")
+                        
+                        if should_switch:
+                            print(f"⚠️ Account {email} is near/at limit ({used}/{total}), triggering switch")
                             print(f"📢 Emitting auto-switch signal for: {email}")
                             # Trigger auto-switch to next healthy account
                             self.auto_switch_to_next_account.emit(email)
@@ -1961,11 +1965,12 @@ class MainWindow(QMainWindow):
             
             for email, account_json, health_status, limit_info in accounts_with_health:
                 if health_status == 'healthy' and email != exhausted_email:
-                    # 检查是否还有额度
+                    # 检查是否还有足够的额度（至少有3个请求的余量）
                     if limit_info and '/' in limit_info:
                         try:
                             used, total = map(int, limit_info.split('/'))
-                            if used < total:
+                            # 只选择还有至少3个请求余量的账号
+                            if total - used >= 3:
                                 # 不排序，保持数据库中的顺序（创建时间顺序）
                                 available_accounts.append(email)
                         except:
