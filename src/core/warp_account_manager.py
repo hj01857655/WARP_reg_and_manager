@@ -414,7 +414,7 @@ class MainWindow(QMainWindow):
         # Timer for active account refresh
         self.active_account_refresh_timer = QTimer()
         self.active_account_refresh_timer.timeout.connect(self.refresh_active_account)
-        self.active_account_refresh_timer.start(30000)  # Refresh active account every 30 seconds
+        self.active_account_refresh_timer.start(15000)  # Refresh active account every 15 seconds
 
         # Timer for status message reset
         self.status_reset_timer = QTimer()
@@ -494,7 +494,7 @@ class MainWindow(QMainWindow):
 
     def init_ui(self):
         self.setWindowTitle(_('app_title'))
-        self.setFixedSize(920, 680)  # Wider window for better visibility
+        self.setFixedSize(1100, 700)  # Even wider window for better visibility
 
         # Add status bar
         self.status_bar = QStatusBar()
@@ -594,18 +594,18 @@ class MainWindow(QMainWindow):
         self.table.setContextMenuPolicy(Qt.CustomContextMenu)
         self.table.customContextMenuRequested.connect(self.show_context_menu)
 
-        # Table header settings - Optimized for wider window
+        # Table header settings - Optimized for 1100px wide window
         header = self.table.horizontalHeader()
         header.setSectionResizeMode(0, QHeaderView.Fixed)  # Action button column fixed width
         header.setSectionResizeMode(1, QHeaderView.Fixed)  # Email column fixed width
         header.setSectionResizeMode(2, QHeaderView.Fixed)  # Status column fixed width
         header.setSectionResizeMode(3, QHeaderView.Fixed)  # Usage column fixed width
         header.setSectionResizeMode(4, QHeaderView.Fixed)  # Created time column fixed width
-        header.resizeSection(0, 90)   # Action button column width
-        header.resizeSection(1, 380)  # Email column width - increased for better readability
-        header.resizeSection(2, 180)  # Status column width
-        header.resizeSection(3, 100)  # Usage column width
-        header.resizeSection(4, 100)  # Created time column width
+        header.resizeSection(0, 100)  # Action button column width
+        header.resizeSection(1, 450)  # Email column width - more space for long emails
+        header.resizeSection(2, 200)  # Status column width
+        header.resizeSection(3, 120)  # Usage column width
+        header.resizeSection(4, 120)  # Created time column width
         header.setFixedHeight(40)  # Higher modern header
 
         layout.addWidget(self.table)
@@ -628,18 +628,20 @@ class MainWindow(QMainWindow):
             
             # Set button state
             is_active = (email == active_account)
-            is_banned = (health_status == _('status_banned_key'))
+            is_banned = (health_status == 'banned')  # Use direct health status
 
             if is_banned:
-                activation_button.setText(_('button_banned'))
+                activation_button.setText('Banned')  # Show banned text
                 activation_button.setProperty("state", "banned")
-                activation_button.setEnabled(False)
+                activation_button.setEnabled(False)  # Disable button for banned accounts
             elif is_active:
                 activation_button.setText(_('button_stop'))
                 activation_button.setProperty("state", "stop")
+                activation_button.setEnabled(True)
             else:
                 activation_button.setText(_('button_start'))
                 activation_button.setProperty("state", "start")
+                activation_button.setEnabled(True)
 
             # Connect button click handler
             activation_button.clicked.connect(lambda checked, e=email: self.toggle_account_activation(e))
@@ -651,9 +653,9 @@ class MainWindow(QMainWindow):
 
             # Status (Column 2)
             try:
-                # Banned account check
-                if health_status == _('status_banned_key'):
-                    status = _('status_banned')
+                # Banned account check - show banned status instead of token status
+                if health_status == 'banned':
+                    status = 'Banned'
                 else:
                     account_data = json.loads(account_json)
                     expiration_time = account_data['stsTokenManager']['expirationTime']
