@@ -50,7 +50,8 @@ except AttributeError:
 from PyQt5.QtWidgets import (QApplication, QMainWindow, QVBoxLayout, QHBoxLayout,
                              QWidget, QPushButton, QTableWidget, QTableWidgetItem,
                              QDialog, QTextEdit, QLabel, QMessageBox, QHeaderView,
-                             QProgressDialog, QAbstractItemView, QStatusBar, QMenu, QAction, QScrollArea, QComboBox)
+                             QProgressDialog, QAbstractItemView, QStatusBar, QMenu, QAction, QScrollArea, QComboBox,
+                             QDesktopWidget)
 from PyQt5.QtCore import Qt, QThread, pyqtSignal, QTimer, QObject
 from PyQt5.QtGui import QFont
 
@@ -501,7 +502,7 @@ class MainWindow(QMainWindow):
 
     def init_ui(self):
         self.setWindowTitle(_('app_title'))
-        self.setFixedSize(700, 650)  # Fixed window size
+        self.setFixedSize(920, 680)  # Wider window for better visibility
 
         # Add status bar
         self.status_bar = QStatusBar()
@@ -524,10 +525,10 @@ class MainWindow(QMainWindow):
         central_widget = QWidget()
         self.setCentralWidget(central_widget)
 
-        # Main layout - Modern spacing
+        # Main layout - Modern spacing with optimized margins
         layout = QVBoxLayout()
-        layout.setContentsMargins(16, 16, 16, 16)  # Wider margins
-        layout.setSpacing(12)  # Wider spacing between elements
+        layout.setContentsMargins(20, 16, 20, 16)  # Wider horizontal margins
+        layout.setSpacing(14)  # Better spacing between elements
 
         # Top buttons - modern spacing
         button_layout = QHBoxLayout()
@@ -587,24 +588,32 @@ class MainWindow(QMainWindow):
         self.table.setAlternatingRowColors(True)
         self.table.setShowGrid(False)
         self.table.verticalHeader().setVisible(False)
-        self.table.verticalHeader().setDefaultSectionSize(40)  # Taller rows for modern look
+        self.table.verticalHeader().setDefaultSectionSize(45)  # Taller rows for better readability
         self.table.setSelectionBehavior(QAbstractItemView.SelectRows)
         self.table.setEditTriggers(QAbstractItemView.NoEditTriggers)
         self.table.setFocusPolicy(Qt.NoFocus)
+        
+        # Set font size for better readability
+        font = QFont()
+        font.setPointSize(10)  # Slightly larger font
+        self.table.setFont(font)
 
         # Add right-click context menu
         self.table.setContextMenuPolicy(Qt.CustomContextMenu)
         self.table.customContextMenuRequested.connect(self.show_context_menu)
 
-        # Table header settings
+        # Table header settings - Optimized for wider window
         header = self.table.horizontalHeader()
-        header.setSectionResizeMode(0, QHeaderView.Fixed)  # Status column fixed width
+        header.setSectionResizeMode(0, QHeaderView.Fixed)  # Action button column fixed width
         header.setSectionResizeMode(1, QHeaderView.Fixed)  # Email column fixed width
-        header.setSectionResizeMode(2, QHeaderView.ResizeToContents)  # Status column content-based
-        header.setSectionResizeMode(3, QHeaderView.ResizeToContents)  # Limit column content-based
-        header.setSectionResizeMode(4, QHeaderView.ResizeToContents)  # Created time column content-based
-        header.resizeSection(0, 100)  # Status column width 100px (for modern buttons)
-        header.resizeSection(1, 250)  # Email column width 250px (fixed)
+        header.setSectionResizeMode(2, QHeaderView.Fixed)  # Status column fixed width
+        header.setSectionResizeMode(3, QHeaderView.Fixed)  # Usage column fixed width
+        header.setSectionResizeMode(4, QHeaderView.Fixed)  # Created time column fixed width
+        header.resizeSection(0, 90)   # Action button column width
+        header.resizeSection(1, 380)  # Email column width - increased for better readability
+        header.resizeSection(2, 180)  # Status column width
+        header.resizeSection(3, 100)  # Usage column width
+        header.resizeSection(4, 100)  # Created time column width
         header.setFixedHeight(40)  # Higher modern header
 
         layout.addWidget(self.table)
@@ -622,7 +631,7 @@ class MainWindow(QMainWindow):
         for row, (email, account_json, health_status, limit_info, created_at) in enumerate(accounts):
             # Activation button (Column 0) - Dark theme compatible
             activation_button = QPushButton()
-            activation_button.setFixedSize(75, 20)  # Larger size to better fill cell
+            activation_button.setFixedSize(75, 28)  # Better button size for modern UI
             activation_button.setObjectName("activationButton")
             
             # Set button state
@@ -2240,6 +2249,17 @@ def main():
     load_stylesheet(app)
 
     window = MainWindow()
+    
+    # Center window on screen for better visibility
+    desktop = QDesktopWidget()
+    screen = desktop.availableGeometry()
+    window_size = window.geometry()
+    
+    # Position window slightly to the right to avoid blocking main work area
+    x = int((screen.width() - window_size.width()) * 0.7)  # 70% from left edge
+    y = int((screen.height() - window_size.height()) * 0.3)  # 30% from top
+    
+    window.move(x, y)
     window.show()
     sys.exit(app.exec_())
 
