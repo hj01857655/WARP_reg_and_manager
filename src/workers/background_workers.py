@@ -84,20 +84,35 @@ class TokenRefreshWorker(QThread):
     progress = pyqtSignal(int, str)
     finished = pyqtSignal(list)
     error = pyqtSignal(str)
+    account_updated = pyqtSignal(str, str, str)  # email, status, limit_info - 实时更新单个账号
 
-    def __init__(self, accounts, proxy_enabled=False):
+    def __init__(self, accounts, proxy_enabled=False, batch_size=5):
         super().__init__()
         self.accounts = accounts
         self.account_manager = DatabaseManager()
         self.proxy_enabled = proxy_enabled
+        self.batch_size = batch_size  # 批量处理大小
+        self._is_cancelled = False
 
+    def cancel(self):
+        """Cancel the refresh operation"""
+        self._is_cancelled = True
+    
     def run(self):
         results = []
         total_accounts = len(self.accounts)
+        processed = 0
 
         for i, (email, account_json, health_status) in enumerate(self.accounts):
+            # Check if cancelled
+            if self._is_cancelled:
+                self.error.emit("Operation cancelled")
+                return
+                
             try:
-                self.progress.emit(int((i / total_accounts) * 100), _('processing_account', email))
+                # Emit more detailed progress
+                progress_percent = int(((i + 1) / total_accounts) * 100)
+                self.progress.emit(progress_percent, f"Processing {email} ({i+1}/{total_accounts})")
 
                 # Skip banned accounts
                 if health_status == _('status_banned_key'):
@@ -141,11 +156,15 @@ class TokenRefreshWorker(QThread):
                     self.account_manager.update_account_health(email, _('status_healthy'))
                     self.account_manager.update_account_limit_info(email, limit_text)
                     results.append((email, _('success'), limit_text))
+                    # Emit real-time update signal
+                    self.account_updated.emit(email, _('success'), limit_text)
                 else:
                     # Failed to get limit info - mark as unhealthy
                     self.account_manager.update_account_health(email, _('status_unhealthy'))
                     self.account_manager.update_account_limit_info(email, _('status_na'))
-                    results.append((email, _('limit_info_failed'), _('status_na')))
+                    results.append((email, _('limit_info_failed'), _('status_na'))
+                    # Emit real-time update signal
+                    self.account_updated.emit(email, _('limit_info_failed'), _('status_na'))
 
             except Exception as e:
                 self.account_manager.update_account_limit_info(email, _('status_na'))

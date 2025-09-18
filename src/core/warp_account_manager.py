@@ -990,38 +990,95 @@ class MainWindow(QMainWindow):
         self.account_creation_worker = None
 
     def refresh_limits(self):
-        """Update limits"""
+        """Update limits with enhanced background processing"""
         accounts = self.account_manager.get_accounts_with_health()
         if not accounts:
             self.status_bar.showMessage(_('no_accounts_to_update'), 3000)
             return
 
-        # Progress dialog
-        self.progress_dialog = QProgressDialog(_('updating_limits'), _('cancel'), 0, 100, self)
+        # Progress dialog with cancel support
+        self.progress_dialog = QProgressDialog(
+            f"Preparing to refresh {len(accounts)} accounts...",
+            "Cancel", 0, 100, self
+        )
         self.progress_dialog.setWindowModality(Qt.WindowModal)
+        self.progress_dialog.setMinimumDuration(0)  # Show immediately
+        self.progress_dialog.canceled.connect(self.cancel_refresh)
         self.progress_dialog.show()
 
-        # Start worker thread
-        self.worker = TokenRefreshWorker(accounts, self.proxy_enabled)
+        # Start worker thread with batch processing
+        batch_size = min(5, max(1, len(accounts) // 10))  # Adaptive batch size
+        self.worker = TokenRefreshWorker(accounts, self.proxy_enabled, batch_size)
         self.worker.progress.connect(self.update_progress)
         self.worker.finished.connect(self.refresh_finished)
         self.worker.error.connect(self.refresh_error)
+        self.worker.account_updated.connect(self.on_account_refreshed)  # Real-time updates
         self.worker.start()
 
-        # Disable buttons
+        # Track refresh state
+        self.refresh_count = 0
+        self.refresh_total = len(accounts)
+        self.refresh_start_time = time.time()
+
+        # Disable buttons during refresh
         self.refresh_limits_button.setEnabled(False)
         self.add_account_button.setEnabled(False)
         self.create_account_button.setEnabled(False)
 
+    def cancel_refresh(self):
+        """Cancel the refresh operation"""
+        if hasattr(self, 'worker') and self.worker.isRunning():
+            self.worker.cancel()
+            self.status_bar.showMessage("Cancelling refresh operation...", 2000)
+    
+    def on_account_refreshed(self, email, status, limit_info):
+        """Handle real-time account refresh update"""
+        self.refresh_count += 1
+        
+        # Update the specific row in the table immediately
+        for row in range(self.table.rowCount()):
+            email_item = self.table.item(row, 1)
+            if email_item and email_item.text() == email:
+                # Update limit column (column 3)
+                limit_item = self.table.item(row, 3)
+                if limit_item:
+                    limit_item.setText(limit_info)
+                else:
+                    self.table.setItem(row, 3, QTableWidgetItem(limit_info))
+                break
+        
+        # Calculate speed
+        elapsed = time.time() - self.refresh_start_time
+        speed = self.refresh_count / elapsed if elapsed > 0 else 0
+        remaining = (self.refresh_total - self.refresh_count) / speed if speed > 0 else 0
+        
+        # Update progress with ETA
+        if remaining > 0:
+            eta_text = f" (ETA: {int(remaining)}s)"
+        else:
+            eta_text = ""
+        
+        self.update_progress(
+            int((self.refresh_count / self.refresh_total) * 100),
+            f"Updated {email} ({self.refresh_count}/{self.refresh_total}){eta_text}"
+        )
+    
     def update_progress(self, value, text):
         """Update progress"""
-        self.progress_dialog.setValue(value)
-        self.progress_dialog.setLabelText(text)
+        if hasattr(self, 'progress_dialog') and self.progress_dialog:
+            self.progress_dialog.setValue(value)
+            self.progress_dialog.setLabelText(text)
 
     def refresh_finished(self, results):
-        """Update completed"""
-        self.progress_dialog.close()
+        """Update completed with statistics"""
+        if hasattr(self, 'progress_dialog'):
+            self.progress_dialog.close()
 
+        # Calculate statistics
+        total_time = time.time() - self.refresh_start_time if hasattr(self, 'refresh_start_time') else 0
+        success_count = sum(1 for _, status, _ in results if status == _('success'))
+        failed_count = len(results) - success_count
+        
         # Reload table (limit information will come automatically from database)
         self.load_accounts()
 
@@ -1030,7 +1087,14 @@ class MainWindow(QMainWindow):
         self.add_account_button.setEnabled(True)
         self.create_account_button.setEnabled(True)
 
-        self.status_bar.showMessage(_('accounts_updated', len(results)), 3000)
+        # Show detailed status message
+        if total_time > 0:
+            status_msg = f"✅ Refreshed {len(results)} accounts in {total_time:.1f}s "
+            status_msg += f"(Success: {success_count}, Failed: {failed_count})"
+        else:
+            status_msg = f"✅ Refreshed {len(results)} accounts"
+        
+        self.status_bar.showMessage(status_msg, 5000)
 
     def refresh_error(self, error_message):
         """Update error"""
