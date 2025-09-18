@@ -99,6 +99,7 @@ class ProxyConfigWorker(QThread):
 class ActiveAccountRefreshWorker(QThread):
     """Worker thread for refreshing active account to avoid UI blocking"""
     refresh_completed = pyqtSignal(bool, str)  # success, email
+    auto_switch_to_next_account = pyqtSignal(str)  # email that needs switching
     
     def __init__(self, email, account_data, account_manager):
         super().__init__()
@@ -171,6 +172,12 @@ class ActiveAccountRefreshWorker(QThread):
 
                         self.account_manager.update_account_limit_info(email, limit_text)
                         print(f"✅ Active account limit updated: {email} - {limit_text}")
+                        
+                        # Check if account has reached limit and auto-switch
+                        if used >= total and total > 0:
+                            print(f"⚠️ Account {email} has reached its limit ({used}/{total})")
+                            # Trigger auto-switch to next healthy account
+                            self.auto_switch_to_next_account.emit(email)
                     else:
                         print(f"❌ Failed to get limit info: {email}")
                     break
@@ -1917,6 +1924,7 @@ class MainWindow(QMainWindow):
                 active_email, active_account_data, self.account_manager
             )
             self.active_refresh_worker.refresh_completed.connect(self._on_active_account_refreshed)
+            self.active_refresh_worker.auto_switch_to_next_account.connect(self._auto_switch_account)
             self.active_refresh_worker.start()
 
         except Exception as e:
@@ -1936,6 +1944,48 @@ class MainWindow(QMainWindow):
                 QTimer.singleShot(100, lambda: self.load_accounts(preserve_limits=True))
         except Exception as e:
             print(f"Active account refresh completion error: {e}")
+
+    def _auto_switch_account(self, exhausted_email):
+        """自动切换到下一个健康账号 - 按创建时间顺序"""
+        try:
+            print(f"🔄 Auto-switching from exhausted account: {exhausted_email}")
+            
+            # 获取所有账号（按创建时间顺序）
+            accounts_with_health = self.account_manager.get_accounts_with_health_and_limits()
+            available_accounts = []
+            
+            for email, account_json, health_status, limit_info in accounts_with_health:
+                if health_status == 'healthy' and email != exhausted_email:
+                    # 检查是否还有额度
+                    if limit_info and '/' in limit_info:
+                        try:
+                            used, total = map(int, limit_info.split('/'))
+                            if used < total:
+                                # 不排序，保持数据库中的顺序（创建时间顺序）
+                                available_accounts.append(email)
+                        except:
+                            # 如果无法解析限制信息，仍然添加到可用列表
+                            available_accounts.append(email)
+                    else:
+                        # 如果没有限制信息，也添加到可用列表
+                        available_accounts.append(email)
+            
+            if available_accounts:
+                # 选择第一个可用账号（最早创建的）
+                next_email = available_accounts[0]
+                
+                print(f"✅ Found {len(available_accounts)} available accounts, switching to: {next_email}")
+                self.show_status_message(f"🔄 Auto-switching to {next_email}", 5000)
+                
+                # 切换到新账号
+                self._complete_account_activation(next_email)
+            else:
+                print("⚠️ No healthy accounts available for switching")
+                self.show_status_message("⚠️ All accounts exhausted or unhealthy!", 8000)
+                
+        except Exception as e:
+            print(f"Auto-switch error: {e}")
+            self.show_status_message(f"❌ Auto-switch failed: {str(e)}", 5000)
 
 
 
