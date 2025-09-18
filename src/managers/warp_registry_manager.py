@@ -128,9 +128,8 @@ class WarpRegistryManager:
                 # 状态正常，不打印信息
                 return True
             elif current_value is None:
-                # 如果值不存在，设置为false
-                print("🔧 ReverseProTrialModalDismissed不存在，设置为false...")
-                return self.set_registry_value("ReverseProTrialModalDismissed", "false", winreg.REG_SZ)
+                # 如果值不存在，不做任何操作，直接返回True
+                return True
             else:
                 # 尝试强制设置为false
                 print(f"⚠️ ReverseProTrialModalDismissed值异常: {current_value}，强制设置为false")
@@ -159,9 +158,8 @@ class WarpRegistryManager:
                 # 状态正常，不打印信息
                 return True
             elif current_value is None:
-                # 如果值不存在，设置为false
-                print("🔧 TelemetryEnabled不存在，设置为false...")
-                return self.set_registry_value("TelemetryEnabled", "false", winreg.REG_SZ)
+                # 如果值不存在，不做任何操作，直接返回True
+                return True
             else:
                 # 尝试强制设置为false
                 print(f"⚠️ TelemetryEnabled值异常: {current_value}，强制设置为false")
@@ -203,12 +201,12 @@ class WarpRegistryManager:
                 # 检查并修正TelemetryEnabled
                 self.check_and_fix_telemetry_enabled()
                 
-                # 每5秒检查一次
-                time.sleep(5)
+                # 每10秒检查一次
+                time.sleep(10)
                 
             except Exception as e:
                 print(f"监控过程中出错: {e}")
-                time.sleep(5)
+                time.sleep(10)
                 continue
     
     def start_monitoring(self):
