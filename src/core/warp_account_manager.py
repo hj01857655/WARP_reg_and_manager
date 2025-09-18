@@ -2051,26 +2051,58 @@ class MainWindow(QMainWindow):
                 
                 # 1. 先关闭 Warp 应用
                 print("🛑 Closing Warp application before switching account...")
-                if warp_manager.stop_warp():
-                    print("✅ Warp closed successfully")
+                if warp_manager.is_warp_running():
+                    if warp_manager.stop_warp():
+                        print("✅ Warp closed successfully")
+                        # 验证 Warp 确实已关闭
+                        import time
+                        max_wait = 10  # 最多等待10秒
+                        for i in range(max_wait):
+                            if not warp_manager.is_warp_running():
+                                print(f"✅ Warp process confirmed closed after {i+1} seconds")
+                                break
+                            time.sleep(1)
+                        else:
+                            print("⚠️ Warp process still running after 10 seconds, forcing kill...")
+                            warp_manager.stop_warp(force=True)
+                            time.sleep(2)
+                    else:
+                        print("⚠️ Failed to close Warp gracefully, trying force kill...")
+                        warp_manager.stop_warp(force=True)
+                        time.sleep(2)
                 else:
-                    print("⚠️ Failed to close Warp, continuing anyway...")
+                    print("ℹ️ Warp is not running, no need to close")
                 
-                # 2. 等待一下确保 Warp 完全关闭
+                # 2. 再次确认 Warp 已关闭
                 import time
-                time.sleep(2)
+                if warp_manager.is_warp_running():
+                    print("❌ Warp is still running, aborting account switch")
+                    self.show_status_message("❌ Failed to close Warp for account switch", 5000)
+                    return
                 
                 # 3. 切换到新账号
+                print(f"🔄 Switching active account to: {next_email}")
                 self._complete_account_activation(next_email)
+                time.sleep(1)  # 给系统一点时间更新配置
                 
                 # 4. 重新打开 Warp 应用
-                print("🚀 Restarting Warp application with new account...")
-                if warp_manager.start_warp(wait_for_startup=True):
-                    print("✅ Warp restarted successfully with new account")
-                    self.show_status_message(f"✅ Switched to {next_email} and Warp restarted", 5000)
+                print("🚀 Starting Warp application with new account...")
+                if not warp_manager.is_warp_running():
+                    if warp_manager.start_warp(wait_for_startup=True):
+                        # 再次验证 Warp 确实已启动
+                        time.sleep(3)  # 额外等待确保完全启动
+                        if warp_manager.is_warp_running():
+                            print("✅ Warp restarted and confirmed running with new account")
+                            self.show_status_message(f"✅ Switched to {next_email} and Warp is running", 5000)
+                        else:
+                            print("⚠️ Warp start command executed but process not detected")
+                            self.show_status_message("⚠️ Warp may not have started properly, please check", 5000)
+                    else:
+                        print("❌ Failed to start Warp")
+                        self.show_status_message("❌ Failed to start Warp, please start it manually", 5000)
                 else:
-                    print("⚠️ Failed to restart Warp, please start it manually")
-                    self.show_status_message("⚠️ Please restart Warp manually", 5000)
+                    print("⚠️ Warp is already running (unexpected)")
+                    self.show_status_message(f"⚠️ Warp already running, switched to {next_email}", 5000)
             else:
                 print("⚠️ No healthy accounts available for switching")
                 self.show_status_message("⚠️ All accounts exhausted or unhealthy!", 8000)

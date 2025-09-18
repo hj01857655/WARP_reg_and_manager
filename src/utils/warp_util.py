@@ -180,8 +180,16 @@ class WarpProcessManager:
             
             # 启动 Warp
             if sys.platform == "win32":
-                # Windows: 使用 start 命令在后台启动
-                subprocess.Popen(["start", "", self.warp_path], shell=True)
+                # Windows: 直接使用 Popen 启动，不需要 shell=True
+                # 使用 CREATE_NEW_PROCESS_GROUP 和 DETACHED_PROCESS 标志让进程独立运行
+                import subprocess
+                startupinfo = subprocess.STARTUPINFO()
+                startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+                subprocess.Popen(
+                    [self.warp_path],
+                    startupinfo=startupinfo,
+                    creationflags=subprocess.CREATE_NEW_PROCESS_GROUP | subprocess.DETACHED_PROCESS
+                )
             elif sys.platform == "darwin":
                 # macOS: 使用 open 命令
                 subprocess.Popen(["open", "-a", "Warp"])
