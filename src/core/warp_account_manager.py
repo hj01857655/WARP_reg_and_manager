@@ -2070,12 +2070,49 @@ class MainWindow(QMainWindow):
             print(f"🔄 Auto-switching from exhausted account: {exhausted_email}")
             
             # 先删除已用完的账号
-            print(f"🗑️ Deleting exhausted account: {exhausted_email}")
-            if self.account_manager.delete_account(exhausted_email):
-                print(f"✅ Account {exhausted_email} deleted successfully")
-                self.show_status_message(f"🗑️ Deleted exhausted account: {exhausted_email}", 3000)
-            else:
-                print(f"❌ Failed to delete account {exhausted_email}")
+            print(f"🗑️ Preparing to delete exhausted account: {exhausted_email}")
+            
+            # 确保账号确实需要删除（再次验证额度）
+            should_delete = True
+            accounts_to_check = self.account_manager.get_accounts_with_health_and_limits()
+            for email, _, _, limit_info in accounts_to_check:
+                if email == exhausted_email:
+                    if limit_info and '/' in limit_info:
+                        try:
+                            used, total = map(int, limit_info.split('/'))
+                            print(f"📊 Verifying deletion: {email} has used {used}/{total} requests")
+                            if used < total - 5:  # 如果还有超过5个请求的余量，不删除
+                                print(f"⚠️ Account {email} still has {total - used} requests left, skipping deletion")
+                                should_delete = False
+                        except Exception as e:
+                            print(f"⚠️ Error parsing limit info: {e}, will delete anyway")
+                    break
+            
+            if should_delete:
+                # 执行删除
+                print(f"🗑️ Deleting account from database: {exhausted_email}")
+                delete_success = self.account_manager.delete_account(exhausted_email)
+                
+                if delete_success:
+                    print(f"✅ Account {exhausted_email} deleted from database successfully")
+                    
+                    # 立即更新UI表格，移除已删除的账号
+                    removed_from_ui = False
+                    for row in range(self.table.rowCount() - 1, -1, -1):
+                        email_item = self.table.item(row, 1)
+                        if email_item and email_item.text() == exhausted_email:
+                            self.table.removeRow(row)
+                            removed_from_ui = True
+                            print(f"✅ Removed {exhausted_email} from UI table (row {row})")
+                            break
+                    
+                    if not removed_from_ui:
+                        print(f"⚠️ Account {exhausted_email} was not found in UI table")
+                    
+                    self.show_status_message(f"🗑️ Deleted exhausted account: {exhausted_email}", 5000)
+                else:
+                    print(f"❌ Failed to delete account {exhausted_email} from database")
+                    self.show_status_message(f"❌ Failed to delete {exhausted_email}", 5000)
             
             # 导入 Warp 进程管理器
             from src.utils.warp_util import warp_manager
