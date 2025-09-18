@@ -526,7 +526,7 @@ def request(flow: http.HTTPFlow) -> None:
         flow.request.headers["x-warp-experiment-id"] = new_experiment_id
         
         print(f"🧪 Experiment ID changed ({flow.request.path}):")
-        if old_experiment_id != '' or old_experiment_id == None:
+        if old_experiment_id != '' or old_experiment_id != None:
             print(f"   Old: {old_experiment_id}")
         print(f"   New: {new_experiment_id}")
 

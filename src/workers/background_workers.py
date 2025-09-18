@@ -12,6 +12,8 @@ import logging
 import requests
 import asyncio
 import os
+import threading
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Optional
 from PyQt5.QtCore import QThread, pyqtSignal
 from src.config.languages import _
@@ -103,74 +105,113 @@ class TokenRefreshWorker(QThread):
         total_accounts = len(self.accounts)
         processed = 0
 
-        for i, (email, account_json, health_status) in enumerate(self.accounts):
+        # Process accounts in batches using ThreadPoolExecutor for parallel processing
+        accounts_batches = [self.accounts[i:i + self.batch_size] for i in range(0, len(self.accounts), self.batch_size)]
+        
+        for batch_index, batch in enumerate(accounts_batches):
             # Check if cancelled
             if self._is_cancelled:
                 self.error.emit("Operation cancelled")
                 return
-                
-            try:
-                # Emit more detailed progress
-                progress_percent = int(((i + 1) / total_accounts) * 100)
-                self.progress.emit(progress_percent, f"Processing {email} ({i+1}/{total_accounts})")
-
-                # Skip banned accounts
-                if health_status == _('status_banned_key'):
-                    self.account_manager.update_account_limit_info(email, _('status_na'))
-                    results.append((email, _('status_banned'), _('status_na')))
-                    continue
-
-                account_data = json.loads(account_json)
-
-                # Check token expiration
-                expiration_time = account_data['stsTokenManager']['expirationTime']
-                # Convert to int if string
-                if isinstance(expiration_time, str):
-                    expiration_time = int(expiration_time)
-                current_time = int(time.time() * 1000)
-
-                if current_time >= expiration_time:
-                    # Token expired, refresh it
-                    self.progress.emit(int((i / total_accounts) * 100), _('refreshing_token', email))
-                    if not self.refresh_token(email, account_data):
-                        # Failed to refresh token - mark as unhealthy
-                        self.account_manager.update_account_health(email, _('status_unhealthy'))
-                        self.account_manager.update_account_limit_info(email, _('status_na'))
-                        results.append((email, _('token_refresh_failed', email), _('status_na')))
-                        continue
-
-                    # Get updated account_data
-                    updated_accounts = self.account_manager.get_accounts()
-                    for updated_email, updated_json in updated_accounts:
-                        if updated_email == email:
-                            account_data = json.loads(updated_json)
-                            break
-
-                # Get limit information
-                limit_info = self.get_limit_info(account_data)
-                if limit_info and isinstance(limit_info, dict):
-                    used = limit_info.get('requestsUsedSinceLastRefresh', 0)
-                    total = limit_info.get('requestLimit', 0)
-                    limit_text = f"{used}/{total}"
-                    # Success - mark as healthy and save limit info
-                    self.account_manager.update_account_health(email, _('status_healthy'))
-                    self.account_manager.update_account_limit_info(email, limit_text)
-                    results.append((email, _('success'), limit_text))
-                    # Emit real-time update signal
-                    self.account_updated.emit(email, _('success'), limit_text)
-                else:
-                    # Failed to get limit info - mark as unhealthy
-                    self.account_manager.update_account_health(email, _('status_unhealthy'))
-                    self.account_manager.update_account_limit_info(email, _('status_na'))
-                    results.append(email, _('limit_info_failed'), _('status_na'))
-                    # Emit real-time update signal
-                    self.account_updated.emit(email, _('limit_info_failed'), _('status_na'))
-
-            except Exception as e:
-                self.account_manager.update_account_limit_info(email, _('status_na'))
-                results.append((email, f"{_('error')}: {str(e)}", _('status_na')))
+            
+            # Process batch concurrently
+            batch_results = self._process_batch(batch, batch_index, len(accounts_batches), processed, total_accounts)
+            results.extend(batch_results)
+            processed += len(batch)
+            
+            # Add small delay between batches to avoid rate limiting
+            if batch_index < len(accounts_batches) - 1:  # Don't delay after last batch
+                time.sleep(0.2)  # 200ms delay between batches
 
         self.finished.emit(results)
+    
+    def _process_batch(self, batch, batch_index, total_batches, processed_before, total_accounts):
+        """Process a batch of accounts concurrently"""
+        batch_results = []
+        
+        with ThreadPoolExecutor(max_workers=min(self.batch_size, 5)) as executor:  # Limit to max 5 concurrent requests
+            # Submit all tasks in the batch
+            futures = {}
+            for i, (email, account_json, health_status) in enumerate(batch):
+                if self._is_cancelled:
+                    break
+                future = executor.submit(self._process_single_account, email, account_json, health_status, processed_before + i + 1, total_accounts)
+                futures[future] = email
+            
+            # Collect results as they complete
+            for future in as_completed(futures):
+                if self._is_cancelled:
+                    break
+                try:
+                    result = future.result(timeout=60)  # 60 second timeout per account
+                    if result:
+                        batch_results.append(result)
+                        # Emit real-time update
+                        email, status, limit_info = result
+                        self.account_updated.emit(email, status, limit_info)
+                except Exception as e:
+                    email = futures[future]
+                    logging.error(f"Error processing {email}: {e}")
+                    batch_results.append((email, f"{_('error')}: {str(e)}", _('status_na')))
+        
+        return batch_results
+    
+    def _process_single_account(self, email, account_json, health_status, current_index, total_accounts):
+        """Process a single account"""
+        try:
+            # Emit progress update
+            progress_percent = int((current_index / total_accounts) * 100)
+            self.progress.emit(progress_percent, f"Processing {email} ({current_index}/{total_accounts})")
+
+            # Skip banned accounts
+            if health_status == _('status_banned_key'):
+                self.account_manager.update_account_limit_info(email, _('status_na'))
+                return (email, _('status_banned'), _('status_na'))
+
+            account_data = json.loads(account_json)
+
+            # Check token expiration
+            expiration_time = account_data['stsTokenManager']['expirationTime']
+            # Convert to int if string
+            if isinstance(expiration_time, str):
+                expiration_time = int(expiration_time)
+            current_time = int(time.time() * 1000)
+
+            if current_time >= expiration_time:
+                # Token expired, refresh it
+                self.progress.emit(int((current_index / total_accounts) * 100), _('refreshing_token', email))
+                if not self.refresh_token(email, account_data):
+                    # Failed to refresh token - mark as unhealthy
+                    self.account_manager.update_account_health(email, _('status_unhealthy'))
+                    self.account_manager.update_account_limit_info(email, _('status_na'))
+                    return (email, _('token_refresh_failed', email), _('status_na'))
+
+                # Get updated account_data
+                updated_accounts = self.account_manager.get_accounts()
+                for updated_email, updated_json in updated_accounts:
+                    if updated_email == email:
+                        account_data = json.loads(updated_json)
+                        break
+
+            # Get limit information
+            limit_info = self.get_limit_info(account_data)
+            if limit_info and isinstance(limit_info, dict):
+                used = limit_info.get('requestsUsedSinceLastRefresh', 0)
+                total = limit_info.get('requestLimit', 0)
+                limit_text = f"{used}/{total}"
+                # Success - mark as healthy and save limit info
+                self.account_manager.update_account_health(email, _('status_healthy'))
+                self.account_manager.update_account_limit_info(email, limit_text)
+                return (email, _('success'), limit_text)
+            else:
+                # Failed to get limit info - mark as unhealthy
+                self.account_manager.update_account_health(email, _('status_unhealthy'))
+                self.account_manager.update_account_limit_info(email, _('status_na'))
+                return (email, _('limit_info_failed'), _('status_na'))
+
+        except Exception as e:
+            self.account_manager.update_account_limit_info(email, _('status_na'))
+            return (email, f"{_('error')}: {str(e)}", _('status_na'))
 
     def refresh_token(self, email, account_data):
         """Refresh Firebase token"""
@@ -309,6 +350,9 @@ class TokenRefreshWorker(QThread):
                 "operationName": "GetRequestLimitInfo"
             }
 
+            # Add minimal delay to avoid rate limiting
+            time.sleep(0.05)  # 50ms delay per request
+            
             # Direct connection - completely bypass proxy
             response = requests.post(url, headers=headers, json=payload, timeout=30, verify=False)
 

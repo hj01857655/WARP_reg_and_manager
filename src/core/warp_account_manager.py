@@ -47,12 +47,13 @@ try:
 except AttributeError:
     # Older Python versions
     pass
-from PyQt5.QtWidgets import (QApplication, QMainWindow, QVBoxLayout, QHBoxLayout,
-                             QWidget, QPushButton, QTableWidget, QTableWidgetItem,
-                             QDialog, QTextEdit, QLabel, QMessageBox, QHeaderView,
-                             QProgressDialog, QAbstractItemView, QStatusBar, QMenu, QAction, QScrollArea, QComboBox,
-                             QDesktopWidget)
-from PyQt5.QtCore import Qt, QThread, pyqtSignal, QTimer, QObject
+from PyQt5.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
+                             QPushButton, QTableWidget, QTableWidgetItem, QMessageBox,
+                             QDialog, QTextEdit, QDialogButtonBox, QStatusBar,
+                             QHeaderView, QProgressDialog, QMenu, QAction,
+                             QAbstractItemView, QDesktopWidget, QLabel, QLineEdit,
+                             QComboBox, QFrame)
+from PyQt5.QtCore import Qt, pyqtSignal, QThread, QTimer
 from PyQt5.QtGui import QFont
 
 
@@ -526,6 +527,111 @@ class MainWindow(QMainWindow):
         layout.setContentsMargins(20, 16, 20, 16)  # Wider horizontal margins
         layout.setSpacing(14)  # Better spacing between elements
 
+        # Statistics Panel - Display account overview
+        stats_panel = QFrame()
+        stats_panel.setFrameStyle(QFrame.StyledPanel)
+        stats_panel.setStyleSheet("""
+            QFrame {
+                background-color: #1e1f2b;
+                border: 1px solid #3a3b47;
+                border-radius: 6px;
+                padding: 10px;
+                margin-bottom: 10px;
+            }
+        """)
+        
+        stats_layout = QHBoxLayout()
+        stats_layout.setSpacing(20)
+        
+        # Create statistics labels
+        self.stats_labels = {
+            'total': QLabel("📊 Total: 0"),
+            'active': QLabel("🟢 Active: 0"),
+            'expired': QLabel("🔴 Expired: 0"),
+            'banned': QLabel("🚫 Banned: 0"),
+            'usage': QLabel("📈 Total Usage: 0")
+        }
+        
+        stats_style = """
+            QLabel {
+                color: #e0e0e0;
+                font-size: 14px;
+                font-weight: 500;
+                padding: 5px 10px;
+                background-color: #2a2b37;
+                border-radius: 4px;
+            }
+        """
+        
+        for label in self.stats_labels.values():
+            label.setStyleSheet(stats_style)
+            stats_layout.addWidget(label)
+        
+        stats_layout.addStretch()
+        stats_panel.setLayout(stats_layout)
+        layout.addWidget(stats_panel)
+        
+        # Search and Filter Bar
+        search_layout = QHBoxLayout()
+        search_layout.setContentsMargins(0, 0, 0, 10)
+        
+        # Search input
+        self.search_input = QLineEdit()
+        self.search_input.setPlaceholderText("🔍 Search by email, ID or status...")
+        self.search_input.setStyleSheet("""
+            QLineEdit {
+                background-color: #2a2b37;
+                color: #e0e0e0;
+                border: 1px solid #3a3b47;
+                border-radius: 4px;
+                padding: 8px 12px;
+                font-size: 14px;
+            }
+            QLineEdit:focus {
+                border-color: #5a6090;
+            }
+        """)
+        self.search_input.textChanged.connect(self.load_accounts)
+        search_layout.addWidget(self.search_input, 3)
+        
+        # Filter dropdown
+        self.filter_combo = QComboBox()
+        self.filter_combo.addItems(["All Accounts", "Active Only", "Expired Only", "Banned Only", "Healthy Only"])
+        self.filter_combo.setStyleSheet("""
+            QComboBox {
+                background-color: #2a2b37;
+                color: #e0e0e0;
+                border: 1px solid #3a3b47;
+                border-radius: 4px;
+                padding: 8px;
+                font-size: 14px;
+                min-width: 150px;
+            }
+            QComboBox::drop-down {
+                border: none;
+            }
+            QComboBox::down-arrow {
+                image: none;
+                border-left: 5px solid transparent;
+                border-right: 5px solid transparent;
+                border-top: 5px solid #e0e0e0;
+                width: 0;
+                height: 0;
+                margin-right: 5px;
+            }
+            QComboBox QAbstractItemView {
+                background-color: #2a2b37;
+                color: #e0e0e0;
+                selection-background-color: #3d415a;
+                border: 1px solid #3a3b47;
+            }
+        """)
+        self.filter_combo.currentIndexChanged.connect(self.load_accounts)
+        search_layout.addWidget(self.filter_combo, 1)
+        
+        search_layout.addStretch()
+        layout.addLayout(search_layout)
+        
         # Top buttons - modern spacing
         button_layout = QHBoxLayout()
         button_layout.setSpacing(12)  # Larger spacing between buttons
@@ -1014,7 +1120,7 @@ class MainWindow(QMainWindow):
         self.progress_dialog.show()
 
         # Start worker thread with batch processing
-        batch_size = min(5, max(1, len(accounts) // 10))  # Adaptive batch size
+        batch_size = min(10, max(3, len(accounts) // 5))  # Adaptive batch size: 3-10 concurrent
         self.worker = TokenRefreshWorker(accounts, self.proxy_enabled, batch_size)
         self.worker.progress.connect(self.update_progress)
         self.worker.finished.connect(self.refresh_finished)
