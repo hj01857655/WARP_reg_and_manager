@@ -192,6 +192,22 @@ class DatabaseManager:
         accounts = cursor.fetchall()
         conn.close()
         return accounts
+    
+    def get_accounts_with_all_info(self) -> List[Tuple[str, str, str, str, str]]:
+        """Get all accounts with complete info (email, account_data, health_status, limit_info, created_at) sorted by creation date (earliest first)"""
+        conn = sqlite3.connect(self.db_path)
+        cursor = conn.cursor()
+        
+        # Check if created_at column exists
+        try:
+            cursor.execute('SELECT email, account_data, health_status, limit_info, created_at FROM accounts ORDER BY created_at ASC')
+        except sqlite3.OperationalError:
+            # Fallback without created_at if column doesn't exist
+            cursor.execute('SELECT email, account_data, health_status, limit_info, NULL FROM accounts ORDER BY email')
+            
+        accounts = cursor.fetchall()
+        conn.close()
+        return accounts
 
     def update_account_health(self, email: str, health_status: str) -> bool:
         """Update account health status"""

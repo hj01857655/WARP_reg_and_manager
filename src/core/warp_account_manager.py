@@ -580,8 +580,8 @@ class MainWindow(QMainWindow):
 
         # Table
         self.table = QTableWidget()
-        self.table.setColumnCount(4)  # Status column added
-        self.table.setHorizontalHeaderLabels([_('current'), _('email'), _('status'), _('limit')])
+        self.table.setColumnCount(5)  # Added created time column
+        self.table.setHorizontalHeaderLabels([_('current'), _('email'), _('status'), _('limit'), _('created')])
 
         # Table settings for dark theme compatibility
         self.table.setAlternatingRowColors(True)
@@ -602,8 +602,9 @@ class MainWindow(QMainWindow):
         header.setSectionResizeMode(1, QHeaderView.Fixed)  # Email column fixed width
         header.setSectionResizeMode(2, QHeaderView.ResizeToContents)  # Status column content-based
         header.setSectionResizeMode(3, QHeaderView.ResizeToContents)  # Limit column content-based
+        header.setSectionResizeMode(4, QHeaderView.ResizeToContents)  # Created time column content-based
         header.resizeSection(0, 100)  # Status column width 100px (for modern buttons)
-        header.resizeSection(1, 300)  # Email column width 250px (fixed)
+        header.resizeSection(1, 250)  # Email column width 250px (fixed)
         header.setFixedHeight(40)  # Higher modern header
 
         layout.addWidget(self.table)
@@ -612,12 +613,13 @@ class MainWindow(QMainWindow):
 
     def load_accounts(self, preserve_limits=False):
         """Load accounts to table"""
-        accounts = self.account_manager.get_accounts_with_health_and_limits()
+        # 使用新方法获取包含创建时间的完整信息
+        accounts = self.account_manager.get_accounts_with_all_info()
 
         self.table.setRowCount(len(accounts))
         active_account = self.account_manager.get_active_account()
 
-        for row, (email, account_json, health_status, limit_info) in enumerate(accounts):
+        for row, (email, account_json, health_status, limit_info, created_at) in enumerate(accounts):
             # Activation button (Column 0) - Dark theme compatible
             activation_button = QPushButton()
             activation_button.setFixedSize(75, 20)  # Larger size to better fill cell
@@ -679,23 +681,41 @@ class MainWindow(QMainWindow):
             limit_item = QTableWidgetItem(limit_info or _('status_not_updated'))
             limit_item.setTextAlignment(Qt.AlignRight | Qt.AlignVCenter)
             self.table.setItem(row, 3, limit_item)
+            
+            # Created time (Column 4)
+            if created_at:
+                # 格式化创建时间（显示为易读格式）
+                try:
+                    from datetime import datetime
+                    # 解析SQLite时间格式
+                    dt = datetime.strptime(created_at, '%Y-%m-%d %H:%M:%S')
+                    # 格式化为更紧凑的显示
+                    created_str = dt.strftime('%m-%d %H:%M')
+                except:
+                    created_str = created_at[:16] if created_at else 'Unknown'
+            else:
+                created_str = 'Unknown'
+            
+            created_item = QTableWidgetItem(created_str)
+            created_item.setTextAlignment(Qt.AlignCenter | Qt.AlignVCenter)
+            self.table.setItem(row, 4, created_item)
 
             # Set row CSS properties for dark theme compatibility
             if health_status == 'banned':
                 # Banned account
-                for col in range(1, 4):
+                for col in range(1, 5):  # 更新为5列
                     item = self.table.item(row, col)
                     if item:
                         item.setData(Qt.UserRole, "banned")
             elif email == active_account:
                 # Active account
-                for col in range(1, 4):
+                for col in range(1, 5):  # 更新为5列
                     item = self.table.item(row, col)
                     if item:
                         item.setData(Qt.UserRole, "active")
             elif health_status == 'unhealthy':
                 # Unhealthy account
-                for col in range(1, 4):
+                for col in range(1, 5):  # 更新为5列
                     item = self.table.item(row, col)
                     if item:
                         item.setData(Qt.UserRole, "unhealthy")
@@ -2041,120 +2061,6 @@ class MainWindow(QMainWindow):
         except Exception as e:
             print(f"Auto-switch error: {e}")
             self.show_status_message(f"❌ Auto-switch failed: {str(e)}", 5000)
-
-
-
-    def _get_account_limit_info(self, account_data):
-        """Get account limit information from Warp API"""
-        try:
-            # Get dynamic OS information
-            os_info = get_os_info()
-            
-            access_token = account_data['stsTokenManager']['accessToken']
-
-            url = "https://app.warp.dev/graphql/v2?op=GetRequestLimitInfo"
-            headers = {
-                'Content-Type': 'application/json',
-                'Authorization': f'Bearer {access_token}',
-                'x-warp-client-version': 'v0.2025.08.27.08.11.stable_04',
-                'x-warp-os-category': os_info['category'],
-                'x-warp-os-name': os_info['name'],
-                'x-warp-os-version': os_info['version'],
-                'Accept': '*/*',
-                'Accept-Language': 'en-US,en;q=0.9',
-                'Accept-Encoding': 'gzip, deflate, br',
-                'x-warp-manager-request': 'true'
-            }
-
-            query = """
-            query GetRequestLimitInfo($requestContext: RequestContext!) {
-              user(requestContext: $requestContext) {
-                __typename
-                ... on UserOutput {
-                  user {
-                    requestLimitInfo {
-                      isUnlimited
-                      nextRefreshTime
-                      requestLimit
-                      requestsUsedSinceLastRefresh
-                      requestLimitRefreshDuration
-                      isUnlimitedAutosuggestions
-                      acceptedAutosuggestionsLimit
-                      acceptedAutosuggestionsSinceLastRefresh
-                      isUnlimitedVoice
-                      voiceRequestLimit
-                      voiceRequestsUsedSinceLastRefresh
-                      voiceTokenLimit
-                      voiceTokensUsedSinceLastRefresh
-                      isUnlimitedCodebaseIndices
-                      maxCodebaseIndices
-                      maxFilesPerRepo
-                      embeddingGenerationBatchSize
-                    }
-                  }
-                }
-                ... on UserFacingError {
-                  error {
-                    __typename
-                    ... on SharedObjectsLimitExceeded {
-                      limit
-                      objectType
-                      message
-                    }
-                    ... on PersonalObjectsLimitExceeded {
-                      limit
-                      objectType
-                      message
-                    }
-                    ... on AccountDelinquencyError {
-                      message
-                    }
-                    ... on GenericStringObjectUniqueKeyConflict {
-                      message
-                    }
-                  }
-                  responseContext {
-                    serverVersion
-                  }
-                }
-              }
-            }
-            """
-
-            payload = {
-                "query": query,
-                "variables": {
-                    "requestContext": {
-                        "clientContext": {
-                            "version": "v0.2025.08.27.08.11.stable_04"
-                        },
-                        "osContext": {
-                            "category": os_info['category'],
-                            "linuxKernelVersion": None,
-                            "name": os_info['category'],
-                            "version": os_info['version']
-                        }
-                    }
-                },
-                "operationName": "GetRequestLimitInfo"
-            }
-
-            # Direct connection - completely bypass proxy
-            response = requests.post(url, headers=headers, json=payload, timeout=30, verify=False)
-
-            if response.status_code == 200:
-                data = response.json()
-                if 'data' in data and data['data'] and 'user' in data['data']:
-                    user_data = data['data']['user']
-                    if user_data and user_data.get('__typename') == 'UserOutput':
-                        user_info = user_data.get('user')
-                        if user_info:
-                            return user_info.get('requestLimitInfo')
-                        return None
-            return None
-        except Exception as e:
-            print(f"Limit information retrieval error: {e}")
-            return None
 
     def auto_renew_tokens(self):
         """Automatic token renewal - runs once per minute"""
