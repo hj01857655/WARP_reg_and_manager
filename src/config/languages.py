@@ -55,7 +55,8 @@ class LanguageManager:
                 'current': 'Current',
                 'email': 'Email',
                 'status': 'Status',
-                'limit': 'Limit',
+                'limit': 'Usage',
+                'created': 'Created',
 
                 # Activation button texts
                 'button_active': 'ACTIVE',

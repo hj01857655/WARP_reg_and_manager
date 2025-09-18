@@ -1996,6 +1996,14 @@ class MainWindow(QMainWindow):
         try:
             print(f"🔄 Auto-switching from exhausted account: {exhausted_email}")
             
+            # 先删除已用完的账号
+            print(f"🗑️ Deleting exhausted account: {exhausted_email}")
+            if self.account_manager.delete_account(exhausted_email):
+                print(f"✅ Account {exhausted_email} deleted successfully")
+                self.show_status_message(f"🗑️ Deleted exhausted account: {exhausted_email}", 3000)
+            else:
+                print(f"❌ Failed to delete account {exhausted_email}")
+            
             # 导入 Warp 进程管理器
             from src.utils.warp_util import warp_manager
             
