@@ -182,7 +182,7 @@ class DatabaseManager:
         conn = sqlite3.connect(self.db_path)
         cursor = conn.cursor()
         
-        # Check if created_at column exists
+        # Query with correct field order from database
         try:
             cursor.execute('SELECT email, account_data, health_status, limit_info FROM accounts ORDER BY created_at ASC')
         except sqlite3.OperationalError:
@@ -193,17 +193,19 @@ class DatabaseManager:
         conn.close()
         return accounts
     
-    def get_accounts_with_all_info(self) -> List[Tuple[str, str, str, str, str]]:
-        """Get all accounts with complete info (email, account_data, health_status, limit_info, created_at) sorted by creation date (earliest first)"""
+    def get_accounts_with_all_info(self) -> List[Tuple[str, str, str, str, str, str]]:
+        """Get all accounts with complete info following DB structure order: (id, email, account_data, health_status, created_at, limit_info)"""
         conn = sqlite3.connect(self.db_path)
         cursor = conn.cursor()
         
-        # Check if created_at column exists
+        # Select fields matching DB structure order (excluding last_updated)
+        # DB order: id, email, account_data, health_status, created_at, last_updated, limit_info
+        # We select: id, email, account_data, health_status, created_at, limit_info
         try:
-            cursor.execute('SELECT email, account_data, health_status, limit_info, created_at FROM accounts ORDER BY created_at ASC')
+            cursor.execute('SELECT id, email, account_data, health_status, created_at, limit_info FROM accounts ORDER BY created_at ASC')
         except sqlite3.OperationalError:
             # Fallback without created_at if column doesn't exist
-            cursor.execute('SELECT email, account_data, health_status, limit_info, NULL FROM accounts ORDER BY email')
+            cursor.execute('SELECT id, email, account_data, health_status, NULL, limit_info FROM accounts ORDER BY email')
             
         accounts = cursor.fetchall()
         conn.close()

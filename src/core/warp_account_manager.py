@@ -573,8 +573,8 @@ class MainWindow(QMainWindow):
 
         # Table
         self.table = QTableWidget()
-        self.table.setColumnCount(5)  # Added created time column
-        self.table.setHorizontalHeaderLabels([_('current'), _('email'), _('status'), _('limit'), _('created')])
+        self.table.setColumnCount(6)  # ID, Email, Status, Usage, Created, Action
+        self.table.setHorizontalHeaderLabels(['ID', 'Email', 'Status', 'Usage', 'Created', 'Action'])
 
         # Table settings for dark theme compatibility
         self.table.setAlternatingRowColors(True)
@@ -596,16 +596,18 @@ class MainWindow(QMainWindow):
 
         # Table header settings - Optimized for 1100px wide window
         header = self.table.horizontalHeader()
-        header.setSectionResizeMode(0, QHeaderView.Fixed)  # Action button column fixed width
+        header.setSectionResizeMode(0, QHeaderView.Fixed)  # ID column fixed width
         header.setSectionResizeMode(1, QHeaderView.Fixed)  # Email column fixed width
         header.setSectionResizeMode(2, QHeaderView.Fixed)  # Status column fixed width
         header.setSectionResizeMode(3, QHeaderView.Fixed)  # Usage column fixed width
         header.setSectionResizeMode(4, QHeaderView.Fixed)  # Created time column fixed width
-        header.resizeSection(0, 100)  # Action button column width
-        header.resizeSection(1, 450)  # Email column width - more space for long emails
-        header.resizeSection(2, 200)  # Status column width
-        header.resizeSection(3, 120)  # Usage column width
+        header.setSectionResizeMode(5, QHeaderView.Fixed)  # Action button column fixed width
+        header.resizeSection(0, 50)   # ID column width
+        header.resizeSection(1, 380)  # Email column width
+        header.resizeSection(2, 180)  # Status column width
+        header.resizeSection(3, 100)  # Usage column width
         header.resizeSection(4, 120)  # Created time column width
+        header.resizeSection(5, 100)  # Action button column width
         header.setFixedHeight(40)  # Higher modern header
 
         layout.addWidget(self.table)
@@ -620,36 +622,17 @@ class MainWindow(QMainWindow):
         self.table.setRowCount(len(accounts))
         active_account = self.account_manager.get_active_account()
 
-        for row, (email, account_json, health_status, limit_info, created_at) in enumerate(accounts):
-            # Activation button (Column 0) - Dark theme compatible
-            activation_button = QPushButton()
-            activation_button.setFixedSize(75, 28)  # Better button size for modern UI
-            activation_button.setObjectName("activationButton")
+        # 数据顺序现在是: (id, email, account_data, health_status, created_at, limit_info)
+        for row, (account_id, email, account_json, health_status, created_at, limit_info) in enumerate(accounts):
+            # ID (Column 0)
+            id_item = QTableWidgetItem(str(account_id))
+            id_item.setTextAlignment(Qt.AlignCenter | Qt.AlignVCenter)
+            self.table.setItem(row, 0, id_item)
             
-            # Set button state
-            is_active = (email == active_account)
-            is_banned = (health_status == 'banned')  # Use direct health status
-
-            if is_banned:
-                activation_button.setText('Banned')  # Show banned text
-                activation_button.setProperty("state", "banned")
-                activation_button.setEnabled(False)  # Disable button for banned accounts
-            elif is_active:
-                activation_button.setText(_('button_stop'))
-                activation_button.setProperty("state", "stop")
-                activation_button.setEnabled(True)
-            else:
-                activation_button.setText(_('button_start'))
-                activation_button.setProperty("state", "start")
-                activation_button.setEnabled(True)
-
-            # Connect button click handler
-            activation_button.clicked.connect(lambda checked, e=email: self.toggle_account_activation(e))
-            self.table.setCellWidget(row, 0, activation_button)
-
             # Email (Column 1)
             email_item = QTableWidgetItem(email)
             self.table.setItem(row, 1, email_item)
+            
 
             # Status (Column 2)
             try:
@@ -677,13 +660,13 @@ class MainWindow(QMainWindow):
                 status = _('status_error')
 
             status_item = QTableWidgetItem(status)
-            status_item.setTextAlignment(Qt.AlignRight | Qt.AlignVCenter)
+            status_item.setTextAlignment(Qt.AlignCenter | Qt.AlignVCenter)
             self.table.setItem(row, 2, status_item)
 
-            # Limit (Column 3) - get from database (default: "Not updated")
-            limit_item = QTableWidgetItem(limit_info or _('status_not_updated'))
-            limit_item.setTextAlignment(Qt.AlignRight | Qt.AlignVCenter)
-            self.table.setItem(row, 3, limit_item)
+            # Usage (Column 3) - get from database (default: "Not updated")
+            usage_item = QTableWidgetItem(limit_info or 'Not updated')
+            usage_item.setTextAlignment(Qt.AlignCenter | Qt.AlignVCenter)
+            self.table.setItem(row, 3, usage_item)
             
             # Created time (Column 4)
             if created_at:
@@ -702,23 +685,49 @@ class MainWindow(QMainWindow):
             created_item = QTableWidgetItem(created_str)
             created_item.setTextAlignment(Qt.AlignCenter | Qt.AlignVCenter)
             self.table.setItem(row, 4, created_item)
+            
+            # Action button (Column 5) - Dark theme compatible
+            activation_button = QPushButton()
+            activation_button.setFixedSize(75, 28)  # Better button size for modern UI
+            activation_button.setObjectName("activationButton")
+            
+            # Set button state
+            is_active = (email == active_account)
+            is_banned = (health_status == 'banned')  # Use direct health status
+
+            if is_banned:
+                activation_button.setText('Banned')  # Show banned text
+                activation_button.setProperty("state", "banned")
+                activation_button.setEnabled(False)  # Disable button for banned accounts
+            elif is_active:
+                activation_button.setText('Stop')
+                activation_button.setProperty("state", "stop")
+                activation_button.setEnabled(True)
+            else:
+                activation_button.setText('Start')
+                activation_button.setProperty("state", "start")
+                activation_button.setEnabled(True)
+
+            # Connect button click handler
+            activation_button.clicked.connect(lambda checked, e=email: self.toggle_account_activation(e))
+            self.table.setCellWidget(row, 5, activation_button)
 
             # Set row CSS properties for dark theme compatibility
             if health_status == 'banned':
                 # Banned account
-                for col in range(1, 5):  # 更新为5列
+                for col in range(0, 5):  # Columns 0-4 (ID to Created)
                     item = self.table.item(row, col)
                     if item:
                         item.setData(Qt.UserRole, "banned")
             elif email == active_account:
                 # Active account
-                for col in range(1, 5):  # 更新为5列
+                for col in range(0, 5):  # Columns 0-4
                     item = self.table.item(row, col)
                     if item:
                         item.setData(Qt.UserRole, "active")
             elif health_status == 'unhealthy':
                 # Unhealthy account
-                for col in range(1, 5):  # 更新为5列
+                for col in range(0, 5):  # Columns 0-4
                     item = self.table.item(row, col)
                     if item:
                         item.setData(Qt.UserRole, "unhealthy")
