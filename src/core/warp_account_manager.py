@@ -626,7 +626,7 @@ class MainWindow(QMainWindow):
         for row, (account_id, email, account_json, health_status, created_at, limit_info) in enumerate(accounts):
             # ID (Column 0)
             id_item = QTableWidgetItem(str(account_id))
-            id_item.setTextAlignment(Qt.AlignCenter | Qt.AlignVCenter)
+            id_item.setTextAlignment(Qt.AlignLeft | Qt.AlignVCenter)
             self.table.setItem(row, 0, id_item)
             
             # Email (Column 1)
@@ -660,12 +660,12 @@ class MainWindow(QMainWindow):
                 status = _('status_error')
 
             status_item = QTableWidgetItem(status)
-            status_item.setTextAlignment(Qt.AlignCenter | Qt.AlignVCenter)
+            status_item.setTextAlignment(Qt.AlignLeft | Qt.AlignVCenter)
             self.table.setItem(row, 2, status_item)
 
             # Usage (Column 3) - get from database (default: "Not updated")
             usage_item = QTableWidgetItem(limit_info or 'Not updated')
-            usage_item.setTextAlignment(Qt.AlignCenter | Qt.AlignVCenter)
+            usage_item.setTextAlignment(Qt.AlignLeft | Qt.AlignVCenter)
             self.table.setItem(row, 3, usage_item)
             
             # Created time (Column 4)
@@ -683,7 +683,7 @@ class MainWindow(QMainWindow):
                 created_str = 'Unknown'
             
             created_item = QTableWidgetItem(created_str)
-            created_item.setTextAlignment(Qt.AlignCenter | Qt.AlignVCenter)
+            created_item.setTextAlignment(Qt.AlignLeft | Qt.AlignVCenter)
             self.table.setItem(row, 4, created_item)
             
             # Action button (Column 5) - Dark theme compatible
