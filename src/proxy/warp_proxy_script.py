@@ -483,9 +483,9 @@ def request(flow: http.HTTPFlow) -> None:
     # Show active account information
     print(f"📧 Current active account: {handler.active_email}")
 
-    # Check token every minute
+    # Check token every 30 seconds
     current_time = time.time()
-    if current_time - handler.last_token_check > 60:  # 60 seconds
+    if current_time - handler.last_token_check > 30:  # 30 seconds
         print("⏰ Time for token check, updating...")
         handler.update_active_token()
         handler.last_token_check = current_time
@@ -511,7 +511,7 @@ def request(flow: http.HTTPFlow) -> None:
 
         # Also show token ending
         if len(handler.active_token) > 100:
-            print(f"   Token : ...{handler.active_token}")
+            print(f"   Token : {handler.active_token}")
 
     else:
         print("❌ ACTIVE TOKEN NOT FOUND - HEADER NOT MODIFIED!")

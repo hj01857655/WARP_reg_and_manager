@@ -174,10 +174,15 @@ class ActiveAccountRefreshWorker(QThread):
                         print(f"✅ Active account limit updated: {email} - {limit_text}")
                         
                         # Check if account has reached limit and auto-switch
+                        print(f"🔍 Checking limit: used={used}, total={total}, should_switch={used >= total and total > 0}")
                         if used >= total and total > 0:
                             print(f"⚠️ Account {email} has reached its limit ({used}/{total})")
+                            print(f"📢 Emitting auto-switch signal for: {email}")
                             # Trigger auto-switch to next healthy account
                             self.auto_switch_to_next_account.emit(email)
+                        else:
+                            remaining = total - used if total > 0 else 'unlimited'
+                            print(f"📊 Account {email} still has {remaining} requests remaining")
                     else:
                         print(f"❌ Failed to get limit info: {email}")
                     break
@@ -395,7 +400,7 @@ class MainWindow(QMainWindow):
         # Timer for active account refresh
         self.active_account_refresh_timer = QTimer()
         self.active_account_refresh_timer.timeout.connect(self.refresh_active_account)
-        self.active_account_refresh_timer.start(60000)  # Refresh active account every 60 seconds
+        self.active_account_refresh_timer.start(30000)  # Refresh active account every 30 seconds
 
         # Timer for status message reset
         self.status_reset_timer = QTimer()
@@ -1879,7 +1884,7 @@ class MainWindow(QMainWindow):
             pass
 
     def refresh_active_account(self):
-        """Refresh token and limit of active account - every 60 seconds"""
+        """Refresh token and limit of active account - every 30 seconds"""
         try:
             # Stop timer if proxy is not active
             if not self.proxy_enabled:
