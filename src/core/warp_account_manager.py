@@ -174,19 +174,36 @@ class ActiveAccountRefreshWorker(QThread):
                         print(f"✅ Active account limit updated: {email} - {limit_text}")
                         
                         # Check if account has reached limit and auto-switch
-                        # 提前切换：当使用量达到147/150时就切换，避免30秒检查间隔的延迟
-                        switch_threshold = 147  # 提前切换阈值
-                        should_switch = (used >= switch_threshold and total == 150) or (used >= total and total > 0)
-                        print(f"🔍 Checking limit: used={used}, total={total}, threshold={switch_threshold}, should_switch={should_switch}")
+                        # 智能判断：考虑30秒检查间隔内可能的请求消耗
+                        remaining = total - used if total > 0 else float('inf')
+                        check_interval = 30  # 检查间隔（秒）
+                        
+                        # 估算30秒内可能消耗的请求数（假设平均每秒0.5-1个请求的高频使用）
+                        estimated_consumption = 15  # 30秒内预计消耗15个请求（保守估计）
+                        
+                        # 如果剩余额度不够支撑到下次检查，就应该切换
+                        # 或者已经达到限制
+                        should_switch = False
+                        
+                        if total == 150:  # 标准账号限制
+                            # 如果剩余额度小于等于预估消耗，就切换
+                            if remaining <= estimated_consumption:
+                                should_switch = True
+                                print(f"⚠️ Account {email} has insufficient remaining quota ({remaining} left, need {estimated_consumption} for next {check_interval}s)")
+                        
+                        # 或者已经完全耗尽
+                        if used >= total and total > 0:
+                            should_switch = True
+                            print(f"⚠️ Account {email} has reached its limit ({used}/{total})")
+                        
+                        print(f"🔍 Checking limit: used={used}, total={total}, remaining={remaining}, estimated_consumption={estimated_consumption}, should_switch={should_switch}")
                         
                         if should_switch:
-                            print(f"⚠️ Account {email} is near/at limit ({used}/{total}), triggering switch")
                             print(f"📢 Emitting auto-switch signal for: {email}")
                             # Trigger auto-switch to next healthy account
                             self.auto_switch_to_next_account.emit(email)
                         else:
-                            remaining = total - used if total > 0 else 'unlimited'
-                            print(f"📊 Account {email} still has {remaining} requests remaining")
+                            print(f"📊 Account {email} has {remaining} requests remaining (sufficient for next {check_interval}s)")
                     else:
                         print(f"❌ Failed to get limit info: {email}")
                     break
@@ -1959,36 +1976,64 @@ class MainWindow(QMainWindow):
         try:
             print(f"🔄 Auto-switching from exhausted account: {exhausted_email}")
             
+            # 导入 Warp 进程管理器
+            from src.utils.warp_util import warp_manager
+            
             # 获取所有账号（按创建时间顺序）
             accounts_with_health = self.account_manager.get_accounts_with_health_and_limits()
             available_accounts = []
             
+            # 使用与检查时相同的智能判断逻辑
+            estimated_consumption = 15  # 30秒内预计消耗15个请求
+            
             for email, account_json, health_status, limit_info in accounts_with_health:
                 if health_status == 'healthy' and email != exhausted_email:
-                    # 检查是否还有足够的额度（至少有3个请求的余量）
+                    # 检查是否还有足够的额度支撑至少一个检查周期
                     if limit_info and '/' in limit_info:
                         try:
                             used, total = map(int, limit_info.split('/'))
-                            # 只选择还有至少3个请求余量的账号
-                            if total - used >= 3:
+                            remaining = total - used
+                            # 只选择有足够额度支撑下一个检查周期的账号
+                            if remaining > estimated_consumption:
                                 # 不排序，保持数据库中的顺序（创建时间顺序）
-                                available_accounts.append(email)
+                                available_accounts.append((email, remaining))
                         except:
-                            # 如果无法解析限制信息，仍然添加到可用列表
-                            available_accounts.append(email)
+                            # 如果无法解析限制信息，仍然添加到可用列表（假设有足够额度）
+                            available_accounts.append((email, 999))
                     else:
-                        # 如果没有限制信息，也添加到可用列表
-                        available_accounts.append(email)
+                        # 如果没有限制信息，也添加到可用列表（假设有足够额度）
+                        available_accounts.append((email, 999))
             
             if available_accounts:
                 # 选择第一个可用账号（最早创建的）
-                next_email = available_accounts[0]
+                next_email = available_accounts[0][0]  # 现在是元组，取第一个元素（email）
+                next_remaining = available_accounts[0][1]
                 
-                print(f"✅ Found {len(available_accounts)} available accounts, switching to: {next_email}")
+                print(f"✅ Found {len(available_accounts)} available accounts, switching to: {next_email} (remaining: {next_remaining})")
                 self.show_status_message(f"🔄 Auto-switching to {next_email}", 5000)
                 
-                # 切换到新账号
+                # 1. 先关闭 Warp 应用
+                print("🛑 Closing Warp application before switching account...")
+                if warp_manager.stop_warp():
+                    print("✅ Warp closed successfully")
+                else:
+                    print("⚠️ Failed to close Warp, continuing anyway...")
+                
+                # 2. 等待一下确保 Warp 完全关闭
+                import time
+                time.sleep(2)
+                
+                # 3. 切换到新账号
                 self._complete_account_activation(next_email)
+                
+                # 4. 重新打开 Warp 应用
+                print("🚀 Restarting Warp application with new account...")
+                if warp_manager.start_warp(wait_for_startup=True):
+                    print("✅ Warp restarted successfully with new account")
+                    self.show_status_message(f"✅ Switched to {next_email} and Warp restarted", 5000)
+                else:
+                    print("⚠️ Failed to restart Warp, please start it manually")
+                    self.show_status_message("⚠️ Please restart Warp manually", 5000)
             else:
                 print("⚠️ No healthy accounts available for switching")
                 self.show_status_message("⚠️ All accounts exhausted or unhealthy!", 8000)
