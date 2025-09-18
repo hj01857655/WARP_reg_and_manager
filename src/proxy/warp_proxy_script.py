@@ -449,10 +449,8 @@ def request(flow: http.HTTPFlow) -> None:
         for header_name, header_value in flow.request.headers.items():
             if ('experiment' in header_name.lower() or 'authorization' in header_name.lower() or 
                 'warp' in header_name.lower() or header_name.lower() in ['content-type', 'user-agent']):
-                if 'authorization' in header_name.lower():
-                    log_to_file(f"  {header_name}: Bearer ...{str(header_value)[-20:] if len(str(header_value)) > 20 else header_value}")
-                else:
-                    log_to_file(f"  {header_name}: {header_value}")
+                
+                log_to_file(f"  {header_name}: {header_value}")
         
         # Log request body for POST requests
         if flow.request.method == "POST" and flow.request.content:
@@ -460,16 +458,14 @@ def request(flow: http.HTTPFlow) -> None:
                 content_type = flow.request.headers.get("content-type", "")
                 if "application/json" in content_type.lower():
                     request_text = flow.request.content.decode('utf-8', errors='replace')
-                    if len(request_text) > 1500:
-                        log_to_file(f"Request Body (first 1500 chars): {request_text[:1500]}...")
-                    else:
-                        log_to_file(f"Request Body: {request_text}")
+                    
+                    log_to_file(f"Request Body: {request_text}")
                 else:
                     log_to_file(f"Request Body: [Binary data - {len(flow.request.content)} bytes]")
             except Exception as e:
                 log_to_file(f"Error reading request content: {e}")
         
-        log_to_file("=== END REQUEST ===")
+        log_to_file("=== END REQUEST ===\n")
 
     # Detect CreateGenericStringObject request - trigger user_settings.json update
     if ("/graphql/v2?op=CreateGenericStringObject" in request_url and
@@ -575,27 +571,20 @@ def response(flow: http.HTTPFlow) -> None:
         for header_name, header_value in flow.request.headers.items():
             if ('experiment' in header_name.lower() or 'authorization' in header_name.lower() or 
                 'warp' in header_name.lower() or header_name.lower() in ['content-type', 'user-agent']):
-                value_preview = f"{header_value[:50]}{'...' if len(str(header_value)) > 50 else ''}"
-                if 'authorization' in header_name.lower():
-                    value_preview = f"Bearer ...{str(header_value)[-20:] if len(str(header_value)) > 20 else header_value}"
-                log_to_file(f"  {header_name}: {value_preview}")
+                # 记录完整值，不截断
+                log_to_file(f"  {header_name}: {header_value}")
         
-        # Log response content (with size limit for readability)
+        # Log response content (完整记录，不截断)
         try:
             content_type = flow.response.headers.get("content-type", "")
             if "application/json" in content_type.lower():
                 response_text = flow.response.content.decode('utf-8', errors='replace')
-                if len(response_text) > 2000:
-                    log_to_file(f"Response Content (first 2000 chars): {response_text[:2000]}...")
-                    log_to_file(f"Response Content (last 500 chars): ...{response_text[-500:]}")
-                else:
-                    log_to_file(f"Response Content: {response_text}")
+                # 完整记录响应内容
+                log_to_file(f"Response Content: {response_text}")
             elif "text/" in content_type.lower():
                 response_text = flow.response.content.decode('utf-8', errors='replace')
-                if len(response_text) > 1000:
-                    log_to_file(f"Response Content (first 1000 chars): {response_text[:1000]}...")
-                else:
-                    log_to_file(f"Response Content: {response_text}")
+                # 完整记录响应内容
+                log_to_file(f"Response Content: {response_text}")
             else:
                 log_to_file(f"Response Content: [Binary data - {len(flow.response.content)} bytes]")
         except Exception as e:
