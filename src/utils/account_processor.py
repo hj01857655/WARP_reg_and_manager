@@ -6,6 +6,7 @@ Account processing and validation functionality
 """
 
 import json
+import logging
 import time
 from typing import Optional, Dict, Any
 from src.utils.utils import safe_json_loads, is_valid_json_structure

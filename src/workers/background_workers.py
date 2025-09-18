@@ -162,7 +162,7 @@ class TokenRefreshWorker(QThread):
                     # Failed to get limit info - mark as unhealthy
                     self.account_manager.update_account_health(email, _('status_unhealthy'))
                     self.account_manager.update_account_limit_info(email, _('status_na'))
-                    results.append((email, _('limit_info_failed'), _('status_na'))
+                    results.append(email, _('limit_info_failed'), _('status_na'))
                     # Emit real-time update signal
                     self.account_updated.emit(email, _('limit_info_failed'), _('status_na'))
 

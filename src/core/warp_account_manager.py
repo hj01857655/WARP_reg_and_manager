@@ -158,6 +158,10 @@ class ActiveAccountRefreshWorker(QThread):
     def _update_active_account_limit(self, email):
         """Update active account limit information"""
         try:
+            # Define check parameters
+            check_interval = 15  # Check interval in seconds
+            estimated_consumption = 15  # Estimated consumption in next interval
+            
             # Get account information again
             accounts = self.account_manager.get_accounts()
             for acc_email, acc_json in accounts:
@@ -2132,7 +2136,7 @@ class MainWindow(QMainWindow):
             available_accounts = []
             
             # 使用与检查时相同的智能判断逻辑
-            estimated_consumption = 15  # 30秒内预计消耗15个请求
+            estimated_consumption = 15  # 15秒内预计消耗15个请求
             
             for email, account_json, health_status, limit_info in accounts_with_health:
                 if health_status == 'healthy' and email != exhausted_email:
