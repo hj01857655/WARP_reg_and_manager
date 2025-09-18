@@ -175,27 +175,19 @@ class ActiveAccountRefreshWorker(QThread):
                         print(f"✅ Active account limit updated: {email} - {limit_text}")
                         
                         # Check if account has reached limit and auto-switch
-                        # 智能判断：考虑30秒检查间隔内可能的请求消耗
                         remaining = total - used if total > 0 else float('inf')
-                        check_interval = 30  # 检查间隔（秒）
                         
-                        # 估算30秒内可能消耗的请求数（假设平均每秒0.5-1个请求的高频使用）
-                        estimated_consumption = 15  # 30秒内预计消耗15个请求（保守估计）
-                        
-                        # 如果剩余额度不够支撑到下次检查，就应该切换
-                        # 或者已经达到限制
+                        # 只在余量为0时触发切换和删除
                         should_switch = False
                         
-                        if total == 150:  # 标准账号限制
-                            # 如果剩余额度小于等于预估消耗，就切换
-                            if remaining <= estimated_consumption:
-                                should_switch = True
-                                print(f"⚠️ Account {email} has insufficient remaining quota ({remaining} left, need {estimated_consumption} for next {check_interval}s)")
-                        
-                        # 或者已经完全耗尽
-                        if used >= total and total > 0:
+                        if remaining == 0 and total > 0:
                             should_switch = True
-                            print(f"⚠️ Account {email} has reached its limit ({used}/{total})")
+                            print(f"🔴 Account {email} has 0 remaining quota ({used}/{total}) - will switch and delete")
+                        elif remaining > 0 and remaining <= 10:
+                            # 余量少于10个时提醒但不切换
+                            print(f"⚠️ Account {email} has only {remaining} requests left ({used}/{total})")
+                        else:
+                            print(f"✅ Account {email} has {remaining} requests remaining ({used}/{total})")
                         
                         print(f"🔍 Checking limit: used={used}, total={total}, remaining={remaining}, estimated_consumption={estimated_consumption}, should_switch={should_switch}")
                         
@@ -2069,23 +2061,30 @@ class MainWindow(QMainWindow):
         try:
             print(f"🔄 Auto-switching from exhausted account: {exhausted_email}")
             
-            # 先删除已用完的账号
-            print(f"🗑️ Preparing to delete exhausted account: {exhausted_email}")
+            # 先删除已用完的账号（余量为0）
+            print(f"🗑️ Checking if account {exhausted_email} should be deleted...")
             
-            # 确保账号确实需要删除（再次验证额度）
-            should_delete = True
+            # 确保账号确实需要删除（余量必须为0）
+            should_delete = False
             accounts_to_check = self.account_manager.get_accounts_with_health_and_limits()
             for email, _, _, limit_info in accounts_to_check:
                 if email == exhausted_email:
                     if limit_info and '/' in limit_info:
                         try:
                             used, total = map(int, limit_info.split('/'))
-                            print(f"📊 Verifying deletion: {email} has used {used}/{total} requests")
-                            if used < total - 5:  # 如果还有超过5个请求的余量，不删除
-                                print(f"⚠️ Account {email} still has {total - used} requests left, skipping deletion")
-                                should_delete = False
+                            remaining = total - used
+                            print(f"📊 Account {email}: used {used}/{total}, remaining: {remaining}")
+                            
+                            # 只有余量为0时才删除
+                            if remaining == 0:
+                                should_delete = True
+                                print(f"✅ Account {email} has 0 remaining quota, will delete")
+                            else:
+                                print(f"⚠️ Account {email} still has {remaining} requests left, not deleting")
                         except Exception as e:
-                            print(f"⚠️ Error parsing limit info: {e}, will delete anyway")
+                            print(f"⚠️ Error parsing limit info: {e}, not deleting")
+                    else:
+                        print(f"⚠️ No limit info for {email}, not deleting")
                     break
             
             if should_delete:
