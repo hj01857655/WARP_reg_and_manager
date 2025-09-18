@@ -453,15 +453,18 @@ def request(flow: http.HTTPFlow) -> None:
                 log_to_file(f"  {header_name}: {header_value}")
         
         # Log request body for POST requests
-        if flow.request.method == "POST" and flow.request.content:
+        if flow.request.method == "POST":
             try:
-                content_type = flow.request.headers.get("content-type", "")
-                if "application/json" in content_type.lower():
-                    request_text = flow.request.content.decode('utf-8', errors='replace')
-                    
-                    log_to_file(f"Request Body: {request_text}")
+                # 检查请求内容是否为空
+                if flow.request.content is None:
+                    log_to_file("Request Body: [Empty request]")
                 else:
-                    log_to_file(f"Request Body: [Binary data - {len(flow.request.content)} bytes]")
+                    content_type = flow.request.headers.get("content-type", "")
+                    if "application/json" in content_type.lower():
+                        request_text = flow.request.content.decode('utf-8', errors='replace')
+                        log_to_file(f"Request Body: {request_text}")
+                    else:
+                        log_to_file(f"Request Body: [Binary data - {len(flow.request.content)} bytes]")
             except Exception as e:
                 log_to_file(f"Error reading request content: {e}")
         
@@ -508,7 +511,7 @@ def request(flow: http.HTTPFlow) -> None:
 
         # Also show token ending
         if len(handler.active_token) > 100:
-            print(f"   Token ending: ...{handler.active_token[-20:]}")
+            print(f"   Token : ...{handler.active_token}")
 
     else:
         print("❌ ACTIVE TOKEN NOT FOUND - HEADER NOT MODIFIED!")
@@ -576,17 +579,21 @@ def response(flow: http.HTTPFlow) -> None:
         
         # Log response content (完整记录，不截断)
         try:
-            content_type = flow.response.headers.get("content-type", "")
-            if "application/json" in content_type.lower():
-                response_text = flow.response.content.decode('utf-8', errors='replace')
-                # 完整记录响应内容
-                log_to_file(f"Response Content: {response_text}")
-            elif "text/" in content_type.lower():
-                response_text = flow.response.content.decode('utf-8', errors='replace')
-                # 完整记录响应内容
-                log_to_file(f"Response Content: {response_text}")
+            # 检查响应内容是否为空
+            if flow.response.content is None:
+                log_to_file("Response Content: [Empty response]")
             else:
-                log_to_file(f"Response Content: [Binary data - {len(flow.response.content)} bytes]")
+                content_type = flow.response.headers.get("content-type", "")
+                if "application/json" in content_type.lower():
+                    response_text = flow.response.content.decode('utf-8', errors='replace')
+                    # 完整记录响应内容
+                    log_to_file(f"Response Content: {response_text}")
+                elif "text/" in content_type.lower():
+                    response_text = flow.response.content.decode('utf-8', errors='replace')
+                    # 完整记录响应内容
+                    log_to_file(f"Response Content: {response_text}")
+                else:
+                    log_to_file(f"Response Content: [Binary data - {len(flow.response.content)} bytes]")
         except Exception as e:
             log_to_file(f"Error reading response content: {e}")
         
