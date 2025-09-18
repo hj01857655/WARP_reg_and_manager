@@ -1189,7 +1189,9 @@ class MainWindow(QMainWindow):
 
         # Calculate statistics
         total_time = time.time() - self.refresh_start_time if hasattr(self, 'refresh_start_time') else 0
-        success_count = sum(1 for _, status, _ in results if status == _('success'))
+        # Status is already translated in TokenRefreshWorker, compare with the translated value
+        success_status = _('success')  # Get the translated success string
+        success_count = sum(1 for _, status, _ in results if status == success_status)
         failed_count = len(results) - success_count
         
         # Reload table (limit information will come automatically from database)
@@ -2333,8 +2335,13 @@ class MainWindow(QMainWindow):
             self.show_status_message(f"❌ Auto-switch failed: {str(e)}", 5000)
 
     def auto_renew_tokens(self):
-        """Automatic token renewal - runs once per minute"""
+        """Automatic token renewal - runs once per minute using background worker"""
         try:
+            # Check if a renewal is already in progress
+            if hasattr(self, 'token_renewal_worker') and self.token_renewal_worker and self.token_renewal_worker.isRunning():
+                print("⚠️ Token renewal already in progress, skipping...")
+                return
+                
             print("🔄 Starting automatic token check...")
 
             # Get all accounts
@@ -2343,9 +2350,11 @@ class MainWindow(QMainWindow):
             if not accounts:
                 return
 
-            expired_count = 0
-            renewed_count = 0
-
+            # Filter accounts that need token renewal
+            accounts_to_renew = []
+            current_time = int(time.time() * 1000)
+            buffer_time = 1 * 60 * 1000  # 1 minute buffer
+            
             for email, account_json, health_status, limit_info in accounts:
                 # Skip banned accounts
                 if health_status == 'banned':
@@ -2357,87 +2366,102 @@ class MainWindow(QMainWindow):
                     # Convert to int if it's a string
                     if isinstance(expiration_time, str):
                         expiration_time = int(expiration_time)
-                    current_time = int(time.time() * 1000)
 
-                    # Check if token has expired (refresh 1 minute earlier)
-                    buffer_time = 1 * 60 * 1000  # 1 dakika buffer
+                    # Check if token has expired or will expire soon
                     if current_time >= (expiration_time - buffer_time):
-                        expired_count += 1
+                        accounts_to_renew.append((email, account_json, health_status))
                         print(f"⏰ Token expiring soon: {email}")
-
-                        # Refresh token
-                        if self.renew_single_token(email, account_data):
-                            renewed_count += 1
-                            print(f"✅ Token updated: {email}")
-                        else:
-                            print(f"❌ Failed to update token: {email}")
 
                 except Exception as e:
                     print(f"Token check error ({email}): {e}")
                     continue
 
-            # Result message
-            if expired_count > 0:
-                if renewed_count > 0:
-                    self.show_status_message(f"🔄 {renewed_count}/{expired_count} tokens renewed", 5000)
-                    # Update table
-                    self.load_accounts(preserve_limits=True)
-                else:
-                    self.show_status_message(f"⚠️ {expired_count} tokens could not be renewed", 5000)
+            # If there are accounts to renew, start background worker
+            if accounts_to_renew:
+                print(f"📋 Found {len(accounts_to_renew)} tokens to renew")
+                
+                # Create and start token renewal worker with small batch size to avoid blocking
+                self.token_renewal_worker = TokenRefreshWorker(accounts_to_renew, self.proxy_enabled, batch_size=2)
+                self.token_renewal_worker.finished.connect(self._on_auto_renew_finished)
+                self.token_renewal_worker.error.connect(self._on_auto_renew_error)
+                self.token_renewal_worker.start()
+                
+                self.show_status_message(f"🔄 Renewing {len(accounts_to_renew)} expiring tokens...", 3000)
             else:
                 print("✅ All tokens valid")
 
         except Exception as e:
             print(f"Automatic token renewal error: {e}")
             self.show_status_message("❌ Token check error", 3000)
-
-    def renew_single_token(self, email, account_data):
-        """Refresh token for single account"""
+    
+    def _on_auto_renew_finished(self, results):
+        """Handle automatic token renewal completion"""
         try:
-            refresh_token = account_data['stsTokenManager']['refreshToken']
-
-            # Firebase token yenileme API'si
-            url = f"https://securetoken.googleapis.com/v1/token?key=AIzaSyBdy3O3S9hrdayLJxJ7mriBR4qgUaUygAs"
-
-            payload = {
-                "grant_type": "refresh_token",
-                "refresh_token": refresh_token
-            }
-
-            headers = {
-                "Content-Type": "application/json"
-            }
-
-            # Direct connection - completely bypass proxy
-            response = requests.post(url, json=payload, headers=headers, timeout=30, verify=False)
-
-            if response.status_code == 200:
-                token_data = response.json()
-
-                # Update new token information
-                new_access_token = token_data['access_token']
-                new_refresh_token = token_data.get('refresh_token', refresh_token)
-                expires_in = int(token_data['expires_in']) * 1000  # convert seconds to milliseconds
-
-                # Yeni expiration time hesapla
-                new_expiration_time = int(time.time() * 1000) + expires_in
-
-                # Update account data
-                account_data['stsTokenManager']['accessToken'] = new_access_token
-                account_data['stsTokenManager']['refreshToken'] = new_refresh_token
-                account_data['stsTokenManager']['expirationTime'] = new_expiration_time
-
-                # Save to database
-                updated_json = json.dumps(account_data)
-                self.account_manager.update_account(email, updated_json)
-
-                return True
-            else:
-                print(f"Token update error: {response.status_code} - {response.text}")
-                return False
-
+            # Calculate statistics
+            success_status = _('success')  # Get the translated success string
+            success_count = sum(1 for _, status, _ in results if status == success_status)
+            failed_count = len(results) - success_count
+            
+            # Update UI if successful
+            if success_count > 0:
+                self.show_status_message(f"🔄 {success_count}/{len(results)} tokens renewed", 5000)
+                # Update table to reflect new token status
+                self.load_accounts(preserve_limits=True)
+            elif failed_count > 0:
+                self.show_status_message(f"⚠️ {failed_count} tokens could not be renewed", 5000)
+                
+            # Clear the worker reference
+            self.token_renewal_worker = None
+            
         except Exception as e:
-            print(f"Token update error ({email}): {e}")
+            print(f"Auto renew finished error: {e}")
+    
+    def _on_auto_renew_error(self, error_message):
+        """Handle automatic token renewal error"""
+        print(f"Auto renewal error: {error_message}")
+        self.show_status_message(f"❌ Token renewal error: {error_message}", 5000)
+        # Clear the worker reference
+        self.token_renewal_worker = None
+
+    def renew_single_token(self, email, account_data, callback=None):
+        """Refresh token for single account using background worker
+        
+        Args:
+            email: Account email
+            account_data: Account data dictionary
+            callback: Optional callback function(success, message) to call when done
+        """
+        try:
+            # Create a single token worker
+            token_worker = TokenWorker(email, account_data, self.proxy_enabled)
+            
+            # Connect signals if callback provided
+            if callback:
+                token_worker.finished.connect(lambda success, msg: callback(success, msg))
+            
+            # Handle completion
+            def on_token_renewed(success, message):
+                if success:
+                    print(f"✅ {message}")
+                    # Reload accounts to update UI if this is the active account
+                    active_email = self.account_manager.get_active_account()
+                    if active_email == email:
+                        self.load_accounts(preserve_limits=True)
+                else:
+                    print(f"❌ {message}")
+            
+            token_worker.finished.connect(on_token_renewed)
+            
+            # Start the worker
+            token_worker.start()
+            
+            # Return True to indicate the process started (not the result)
+            return True
+            
+        except Exception as e:
+            print(f"Token renewal start error ({email}): {e}")
+            if callback:
+                callback(False, str(e))
             return False
 
     def reset_status_message(self):
