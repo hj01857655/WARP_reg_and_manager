@@ -19,6 +19,36 @@ from PyQt5.QtCore import QThread, pyqtSignal
 from src.config.languages import _
 from src.managers.database_manager import DatabaseManager
 
+# Global session for connection reuse
+_session = None
+_session_lock = threading.Lock()
+
+def get_session():
+    """Get or create a global requests session with connection pooling"""
+    global _session
+    with _session_lock:
+        if _session is None:
+            _session = requests.Session()
+            # Configure session for better resource management
+            _session.verify = False  # Maintain existing SSL behavior
+            adapter = requests.adapters.HTTPAdapter(
+                pool_connections=20,  # Number of urllib3 connection pools to cache
+                pool_maxsize=20,      # Maximum number of connections to save in the pool
+                max_retries=3,        # Retry failed requests
+                pool_block=False      # Don't block when pool is full
+            )
+            _session.mount('https://', adapter)
+            _session.mount('http://', adapter)
+        return _session
+
+def cleanup_session():
+    """Clean up the global session to free resources"""
+    global _session
+    with _session_lock:
+        if _session is not None:
+            _session.close()
+            _session = None
+
 
 class TokenWorker(QThread):
     """Single token refresh in background"""
@@ -63,8 +93,9 @@ class TokenWorker(QThread):
                 'refresh_token': refresh_token
             }
 
-            # Direct connection - completely bypass proxy
-            response = requests.post(url, json=data, headers=headers, timeout=30, verify=False)
+            # Use session for connection pooling
+            session = get_session()
+            response = session.post(url, json=data, headers=headers, timeout=30)
 
             if response.status_code == 200:
                 token_data = response.json()
@@ -130,29 +161,41 @@ class TokenRefreshWorker(QThread):
         batch_results = []
         
         with ThreadPoolExecutor(max_workers=min(self.batch_size, 5)) as executor:  # Limit to max 5 concurrent requests
-            # Submit all tasks in the batch
-            futures = {}
-            for i, (email, account_json, health_status) in enumerate(batch):
-                if self._is_cancelled:
-                    break
-                future = executor.submit(self._process_single_account, email, account_json, health_status, processed_before + i + 1, total_accounts)
-                futures[future] = email
-            
-            # Collect results as they complete
-            for future in as_completed(futures):
-                if self._is_cancelled:
-                    break
-                try:
-                    result = future.result(timeout=60)  # 60 second timeout per account
-                    if result:
-                        batch_results.append(result)
-                        # Emit real-time update
-                        email, status, limit_info = result
-                        self.account_updated.emit(email, status, limit_info)
-                except Exception as e:
-                    email = futures[future]
-                    logging.error(f"Error processing {email}: {e}")
-                    batch_results.append((email, f"{_('error')}: {str(e)}", _('status_na')))
+            try:
+                # Submit all tasks in the batch
+                futures = {}
+                for i, (email, account_json, health_status) in enumerate(batch):
+                    if self._is_cancelled:
+                        break
+                    future = executor.submit(self._process_single_account, email, account_json, health_status, processed_before + i + 1, total_accounts)
+                    futures[future] = email
+                
+                # Collect results as they complete
+                for future in as_completed(futures, timeout=300):  # Overall batch timeout of 5 minutes
+                    if self._is_cancelled:
+                        # Cancel all pending futures
+                        for pending_future in futures:
+                            if not pending_future.done():
+                                pending_future.cancel()
+                        break
+                    try:
+                        result = future.result(timeout=60)  # 60 second timeout per account
+                        if result:
+                            batch_results.append(result)
+                            # Emit real-time update
+                            email, status, limit_info = result
+                            self.account_updated.emit(email, status, limit_info)
+                    except Exception as e:
+                        email = futures[future]
+                        logging.error(f"Error processing {email}: {e}")
+                        batch_results.append((email, f"{_('error')}: {str(e)}", _('status_na')))
+                        
+            except Exception as e:
+                logging.error(f"Batch processing error: {e}")
+                # Ensure all futures are cancelled on error
+                for future in futures:
+                    if not future.done():
+                        future.cancel()
         
         return batch_results
     
@@ -229,7 +272,7 @@ class TokenRefreshWorker(QThread):
                 'refresh_token': refresh_token
             }
 
-            # Direct connection - completely bypass proxy
+            # Direct connection - skip SSL verification
             response = requests.post(url, json=data, headers=headers, timeout=30, verify=False)
 
             if response.status_code == 200:
@@ -353,8 +396,9 @@ class TokenRefreshWorker(QThread):
             # Add minimal delay to avoid rate limiting
             time.sleep(0.05)  # 50ms delay per request
             
-            # Direct connection - completely bypass proxy
-            response = requests.post(url, headers=headers, json=payload, timeout=30, verify=False)
+            # Use session for connection pooling
+            session = get_session()
+            response = session.post(url, headers=headers, json=payload, timeout=30)
 
             if response.status_code == 200:
                 data = response.json()
@@ -393,13 +437,26 @@ class AccountCreationWorker(QThread):
                 # Run automatic Warp.dev account creation without proxy
                 self.progress.emit("Creating temporary email address...")
                 
-                # Create new event loop for this thread
+                # Create new event loop for this thread with proper cleanup
                 loop = asyncio.new_event_loop()
                 asyncio.set_event_loop(loop)
                 
                 try:
                     self.progress.emit("Sending verification code...")
-                    result = loop.run_until_complete(create_warp_account_automatically())
+                    
+                    # Run the async operation with a timeout to prevent hanging
+                    try:
+                        result = asyncio.wait_for(
+                            create_warp_account_automatically(), 
+                            timeout=300.0  # 5-minute timeout
+                        )
+                        result = loop.run_until_complete(result)
+                    except asyncio.TimeoutError:
+                        self.error.emit("Account creation timed out after 5 minutes")
+                        return
+                    except Exception as e:
+                        self.error.emit(f"Async operation error: {str(e)}")
+                        return
                     
                     if result:
                         # Check if result contains error information
@@ -437,8 +494,29 @@ class AccountCreationWorker(QThread):
                         self.finished.emit(result)
                     else:
                         self.error.emit("Failed to create Warp.dev account")
+                        
                 finally:
-                    loop.close()
+                    # Properly clean up the event loop
+                    try:
+                        # Cancel all remaining tasks
+                        pending_tasks = asyncio.all_tasks(loop)
+                        if pending_tasks:
+                            for task in pending_tasks:
+                                task.cancel()
+                            # Wait for all tasks to be cancelled
+                            loop.run_until_complete(
+                                asyncio.gather(*pending_tasks, return_exceptions=True)
+                            )
+                    except Exception as e:
+                        logging.warning(f"Error cancelling tasks: {e}")
+                    finally:
+                        try:
+                            loop.close()
+                        except Exception as e:
+                            logging.warning(f"Error closing event loop: {e}")
+                        finally:
+                            # Reset the event loop policy to ensure clean state
+                            asyncio.set_event_loop(None)
                     
             except ImportError as ie:
                 self.error.emit(f"Missing dependencies: {str(ie)}")

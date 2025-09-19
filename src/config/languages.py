@@ -6,15 +6,22 @@ Simplified English-only language system
 """
 
 class LanguageManager:
-    """English-only language manager"""
+    """Multi-language manager with Chinese and English support"""
 
     def __init__(self):
-        self.current_language = 'en'
+        self.current_language = self.detect_system_language()
         self.translations = self.load_translations()
 
     def detect_system_language(self):
-        """Always return English"""
-        return 'en'
+        """Detect system language, default to Chinese"""
+        try:
+            import locale
+            system_lang = locale.getdefaultlocale()[0]
+            if system_lang and 'zh' in system_lang.lower():
+                return 'zh'
+            return 'en'
+        except:
+            return 'zh'  # Default to Chinese
 
     def load_translations(self):
         """Load English translations"""
@@ -40,6 +47,19 @@ class LanguageManager:
                 'auto_add_account': 'Auto Add Account',
                 'refresh_limits': 'Refresh Limits',
                 'help': 'Help',
+                'help_tooltip': 'Contact Us - Get help and support',
+                
+                # Contact Us dialog
+                'contact_us_title': 'Contact Us',
+                'contact_us_header': '📢 Connect with Us',
+                'contact_description': 'Welcome to our community! Use the links below to get the latest updates, community support, and technical help.',
+                'contact_channel_desc': '📢 <b>Channel:</b> Latest updates and releases',
+                'contact_chat_desc': '💬 <b>Chat:</b> Community support and discussions',
+                'contact_github_desc': '📁 <b>GitHub:</b> Source code and development',
+                'contact_telegram_channel': '📢 Telegram Channel',
+                'contact_telegram_chat': '💬 Telegram Chat',
+                'contact_github_repo': '📁 GitHub Repository',
+                'contact_close': '✖️ Close',
                 'activate': '🟢 Activate',
                 'deactivate': '🔴 Deactivate',
                 'delete_account': '🗑️ Delete Account',
@@ -197,6 +217,7 @@ You need to install the certificate manually. This procedure is performed only o
                 # Status bar messages
                 'default_status': 'Enable proxy and click start button on accounts to begin usage.',
                 'default_status_debug': 'Enable proxy and click start button on accounts to begin usage. (Debug mode active)',
+                'search_placeholder': '🔍 Search by email, ID, status (active/banned/expired)...',
 
                 # Debug and console messages
                 'stylesheet_load_error': 'Failed to load stylesheet: {}',
@@ -207,6 +228,37 @@ You need to install the certificate manually. This procedure is performed only o
                 'active_account_clear_error': 'Active account clear error: {}',
                 'account_delete_error': 'Account delete error: {}',
                 'limit_info_update_error': 'Limit info update error: {}',
+            },
+            'zh': {
+                # Contact Us dialog (Chinese)
+                'contact_us_title': '联系我们',
+                'contact_us_header': '📢 与我们联系',
+                'contact_description': '欢迎加入我们的社区！下面的链接可以帮助您获取最新更新、社区支持和技术帮助。',
+                'contact_channel_desc': '📢 <b>频道:</b> 最新更新和发布',
+                'contact_chat_desc': '💬 <b>聊天:</b> 社区支持和讨论',
+                'contact_github_desc': '📁 <b>GitHub:</b> 源代码和开发',
+                'contact_telegram_channel': '📢 Telegram 频道',
+                'contact_telegram_chat': '💬 Telegram 聊天',
+                'contact_github_repo': '📁 GitHub 仓库',
+                'contact_close': '✖️ 关闭',
+                
+                # Basic UI translations
+                'help': '帮助',
+                'help_tooltip': '联系我们 - 获取帮助和支持',
+                'app_title': 'Warp 账号管理器',
+                'proxy_start': '启动代理',
+                'proxy_stop': '停止代理',
+                'proxy_active': '代理活跃',
+                'add_account': '手动添加账号',
+                'auto_add_account': '自动添加账号',
+                'refresh_limits': '刷新限制',
+                'email': '邮箱',
+                'status': '状态',
+                'limit': '用量',
+                'created': '创建时间',
+                'default_status': '启用代理并点击账号的开始按钮来开始使用。',
+                'default_status_debug': '启用代理并点击账号的开始按钮来开始使用。（调试模式已激活）',
+                'search_placeholder': '🔍 按邮箱、ID、状态（活跃/封禁/过期）搜索...',
             }
         }
 
@@ -223,16 +275,19 @@ You need to install the certificate manually. This procedure is performed only o
             return key
 
     def set_language(self, language_code):
-        """Set language (always English)"""
-        return True
+        """Set language"""
+        if language_code in self.translations:
+            self.current_language = language_code
+            return True
+        return False
 
     def get_current_language(self):
         """Return current language"""
-        return 'en'
+        return self.current_language
 
     def get_available_languages(self):
         """Return available languages"""
-        return ['en']
+        return ['en', 'zh']
 
 # Global language manager instance
 _language_manager = None

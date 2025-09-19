@@ -40,13 +40,11 @@ else:
 # Disable SSL warnings (when using mitmproxy)
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
-# SSL verification bypass - complete SSL verification disable
+# SSL handling - keep verification enabled for security but add certificates if needed
 import ssl
-try:
-    ssl._create_default_https_context = ssl._create_unverified_context
-except AttributeError:
-    # Older Python versions
-    pass
+import urllib3
+# Only disable SSL warnings for mitmproxy connections, not global SSL
+urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 from PyQt5.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
                              QPushButton, QTableWidget, QTableWidgetItem, QMessageBox,
                              QDialog, QTextEdit, QDialogButtonBox, QStatusBar,
@@ -75,8 +73,12 @@ class ProxyStartWorker(QThread):
                 self.proxy_started.emit(True, proxy_url)
             else:
                 self.proxy_started.emit(False, "Failed to start mitmproxy")
+        except (ConnectionError, TimeoutError) as e:
+            print(f"Network error starting proxy: {e}")
+            self.proxy_started.emit(False, f"Network error: {str(e)}")
         except Exception as e:
-            self.proxy_started.emit(False, str(e))
+            print(f"Unexpected error starting proxy: {e}")
+            self.proxy_started.emit(False, f"Unexpected error: {str(e)}")
 
 
 # Proxy configuration worker thread
@@ -141,6 +143,7 @@ class ActiveAccountRefreshWorker(QThread):
                 'refresh_token': refresh_token
             }
 
+            # Skip SSL verification directly
             response = requests.post(url, json=data, headers=headers, timeout=10, verify=False)
             if response.status_code == 200:
                 token_data = response.json()
@@ -160,14 +163,17 @@ class ActiveAccountRefreshWorker(QThread):
         """Update active account limit information"""
         try:
             # Define check parameters
-            check_interval = 15  # Check interval in seconds
+            check_interval = 19  # Check interval in seconds
             estimated_consumption = 15  # Estimated consumption in next interval
             
-            # Get account information again
-            accounts = self.account_manager.get_accounts()
-            for acc_email, acc_json in accounts:
+            # Get account information again with health status
+            accounts_with_health = self.account_manager.get_accounts_with_health()
+            health_status = 'healthy'  # Default status
+            
+            for acc_email, acc_json, acc_health in accounts_with_health:
                 if acc_email == email:
                     account_data = json.loads(acc_json)
+                    health_status = acc_health
 
                     # Get limit information
                     limit_info = self._get_account_limit_info(account_data)
@@ -182,24 +188,37 @@ class ActiveAccountRefreshWorker(QThread):
                         # Check if account has reached limit and auto-switch
                         remaining = total - used if total > 0 else float('inf')
                         
-                        # 只在余量为0时触发切换和删除
+                        # 根据不同情况判断是否需要切换
                         should_switch = False
+                        switch_reason = ""
+                        
+                        # 检查是否为被封禁账号（通过健康状态判断）
+                        is_banned = (health_status == 'banned')
                         
                         if remaining == 0 and total > 0:
                             should_switch = True
-                            print(f"🔴 Account {email} has 0 remaining quota ({used}/{total}) - will switch and delete")
+                            if is_banned:
+                                switch_reason = "banned_and_exhausted"
+                                print(f"🔴 Account {email} is banned and has 0 remaining quota ({used}/{total}) - will switch and delete")
+                            else:
+                                switch_reason = "exhausted_only"
+                                print(f"⚪ Account {email} has 0 remaining quota ({used}/{total}) - will switch but keep account for reset")
+                        elif is_banned:
+                            should_switch = True
+                            switch_reason = "banned_only"
+                            print(f"🚫 Account {email} is banned ({used}/{total}) - will switch and delete")
                         elif remaining > 0 and remaining <= 10:
                             # 余量少于10个时提醒但不切换
                             print(f"⚠️ Account {email} has only {remaining} requests left ({used}/{total})")
                         else:
                             print(f"✅ Account {email} has {remaining} requests remaining ({used}/{total})")
                         
-                        print(f"🔍 Checking limit: used={used}, total={total}, remaining={remaining}, estimated_consumption={estimated_consumption}, should_switch={should_switch}")
+                        print(f"🔍 Checking limit: used={used}, total={total}, remaining={remaining}, estimated_consumption={estimated_consumption}, should_switch={should_switch}, reason={switch_reason}")
                         
                         if should_switch:
-                            print(f"📢 Emitting auto-switch signal for: {email}")
-                            # Trigger auto-switch to next healthy account
-                            self.auto_switch_to_next_account.emit(email)
+                            print(f"📢 Emitting auto-switch signal for: {email} (reason: {switch_reason})")
+                            # Trigger auto-switch to next healthy account with reason
+                            self.auto_switch_to_next_account.emit(f"{email}|{switch_reason}")
                         else:
                             print(f"📊 Account {email} has {remaining} requests remaining (sufficient for next {check_interval}s)")
                     else:
@@ -305,7 +324,7 @@ class ActiveAccountRefreshWorker(QThread):
                 "operationName": "GetRequestLimitInfo"
             }
 
-            # Direct connection - completely bypass proxy
+            # Direct connection - skip SSL verification
             response = requests.post(url, headers=headers, json=payload, timeout=30, verify=False)
 
             if response.status_code == 200:
@@ -406,20 +425,20 @@ class MainWindow(QMainWindow):
         self.proxy_timer.timeout.connect(self.check_proxy_status)
         self.proxy_timer.start(5000)  # Check every 5 seconds
 
-        # Timer for checking ban notifications
+        # Timer for checking ban notifications (reduced frequency)
         self.ban_timer = QTimer()
         self.ban_timer.timeout.connect(self.check_ban_notifications)
-        self.ban_timer.start(1000)  # Check every 1 second
+        self.ban_timer.start(5000)  # Check every 5 seconds (reduced from 1s)
 
         # Timer for automatic token renewal
         self.token_renewal_timer = QTimer()
         self.token_renewal_timer.timeout.connect(self.auto_renew_tokens)
         self.token_renewal_timer.start(60000)  # Check every 1 minute (60000 ms)
 
-        # Timer for active account refresh
+        # Timer for active account refresh (optimized frequency)
         self.active_account_refresh_timer = QTimer()
         self.active_account_refresh_timer.timeout.connect(self.refresh_active_account)
-        self.active_account_refresh_timer.start(15000)  # Refresh active account every 15 seconds
+        self.active_account_refresh_timer.start(30000)  # Refresh active account every 30 seconds (increased from 20s)
 
         # Timer for status message reset
         self.status_reset_timer = QTimer()
@@ -432,6 +451,20 @@ class MainWindow(QMainWindow):
         # Variables for token worker
         self.token_worker = None
         self.token_progress_dialog = None
+        
+        # Performance optimization: cache frequently accessed data
+        self._accounts_cache = None
+        self._cache_timestamp = 0
+        self._cache_ttl = 10  # Cache valid for 10 seconds
+        
+        # UI update throttling
+        self._ui_update_timer = QTimer()
+        self._ui_update_timer.setSingleShot(True)
+        self._ui_update_timer.timeout.connect(self._perform_ui_update)
+        self._pending_ui_update = False
+        
+        # Initialize resource monitoring
+        self._init_resource_monitoring()
 
     def _check_and_cleanup_startup_state(self):
         """检查并清理启动时的状态不一致问题"""
@@ -464,11 +497,89 @@ class MainWindow(QMainWindow):
                     
         except Exception as e:
             print(f"启动状态检查失败: {e}")
+    
+    def _get_cached_accounts(self, force_refresh=False):
+        """Get accounts with caching to reduce database queries"""
+        import time
+        current_time = time.time()
+        
+        # Check if cache is valid
+        if (not force_refresh and 
+            self._accounts_cache is not None and 
+            (current_time - self._cache_timestamp) < self._cache_ttl):
+            return self._accounts_cache
+        
+        # Refresh cache
+        self._accounts_cache = self.account_manager.get_accounts_with_health_and_limits()
+        self._cache_timestamp = current_time
+        return self._accounts_cache
+    
+    def _invalidate_accounts_cache(self):
+        """Invalidate accounts cache when data changes"""
+        self._accounts_cache = None
+        self._cache_timestamp = 0
+    
+    def _schedule_ui_update(self, delay_ms=500):
+        """Schedule a throttled UI update to avoid frequent refreshes"""
+        if not self._pending_ui_update:
+            self._pending_ui_update = True
+            self._ui_update_timer.start(delay_ms)
+    
+    def _perform_ui_update(self):
+        """Perform the actual UI update"""
+        self._pending_ui_update = False
+        self.load_accounts(preserve_limits=True)
+    
+    def _init_resource_monitoring(self):
+        """Initialize resource monitoring with appropriate settings"""
+        try:
+            from src.utils.resource_monitor import start_resource_monitoring, get_resource_monitor
+            # Start resource monitoring with 2-minute intervals
+            start_resource_monitoring(check_interval_ms=120000)
+            
+            # Connect to resource monitor signals for debugging/logging
+            resource_monitor = get_resource_monitor()
+            resource_monitor.memory_warning.connect(self._on_memory_warning)
+            resource_monitor.cleanup_completed.connect(self._on_cleanup_completed)
+            
+            print("✅ Resource monitoring initialized")
+        except ImportError:
+            print("⚠️ Resource monitoring not available (missing psutil dependency)")
+        except Exception as e:
+            print(f"⚠️ Failed to initialize resource monitoring: {e}")
+    
+    def _on_memory_warning(self, percentage):
+        """Handle memory warning from resource monitor"""
+        print(f"⚠️ High memory usage detected: {percentage:.1f}%")
+        # Show a brief status message about high memory usage
+        self.show_status_message(f"⚠️ High memory usage: {percentage:.1f}%", 3000)
+    
+    def _on_cleanup_completed(self, collected_objects):
+        """Handle cleanup completion from resource monitor"""
+        if collected_objects > 0:
+            print(f"✅ Resource cleanup completed, collected {collected_objects} objects")
+            # Optionally show status message for significant cleanups
+            if collected_objects > 100:
+                self.show_status_message(f"🔄 Memory cleanup: {collected_objects} objects freed", 2000)
 
     def closeEvent(self, event):
         """程序关闭时的清理工作"""
         try:
             print("🔄 程序关闭，正在清理资源...")
+            
+            # Stop resource monitoring and perform final cleanup
+            try:
+                from src.utils.resource_monitor import stop_resource_monitoring, force_resource_cleanup
+                print("🔄 Stopping resource monitoring...")
+                stop_resource_monitoring()
+                # Force final cleanup
+                collected = force_resource_cleanup()
+                if collected > 0:
+                    print(f"✅ Final cleanup collected {collected} objects")
+            except ImportError:
+                pass
+            except Exception as e:
+                print(f"⚠️ Error during resource cleanup: {e}")
             
             # 停止所有定时器
             if hasattr(self, 'proxy_timer'):
@@ -527,57 +638,13 @@ class MainWindow(QMainWindow):
         layout.setContentsMargins(20, 16, 20, 16)  # Wider horizontal margins
         layout.setSpacing(14)  # Better spacing between elements
 
-        # Statistics Panel - Display account overview
-        stats_panel = QFrame()
-        stats_panel.setFrameStyle(QFrame.StyledPanel)
-        stats_panel.setStyleSheet("""
-            QFrame {
-                background-color: #1e1f2b;
-                border: 1px solid #3a3b47;
-                border-radius: 6px;
-                padding: 10px;
-                margin-bottom: 10px;
-            }
-        """)
-        
-        stats_layout = QHBoxLayout()
-        stats_layout.setSpacing(20)
-        
-        # Create statistics labels
-        self.stats_labels = {
-            'total': QLabel("📊 Total: 0"),
-            'active': QLabel("🟢 Active: 0"),
-            'expired': QLabel("🔴 Expired: 0"),
-            'banned': QLabel("🚫 Banned: 0"),
-            'usage': QLabel("📈 Total Usage: 0")
-        }
-        
-        stats_style = """
-            QLabel {
-                color: #e0e0e0;
-                font-size: 14px;
-                font-weight: 500;
-                padding: 5px 10px;
-                background-color: #2a2b37;
-                border-radius: 4px;
-            }
-        """
-        
-        for label in self.stats_labels.values():
-            label.setStyleSheet(stats_style)
-            stats_layout.addWidget(label)
-        
-        stats_layout.addStretch()
-        stats_panel.setLayout(stats_layout)
-        layout.addWidget(stats_panel)
-        
-        # Search and Filter Bar
+        # Search and Language Bar
         search_layout = QHBoxLayout()
         search_layout.setContentsMargins(0, 0, 0, 10)
         
         # Search input
         self.search_input = QLineEdit()
-        self.search_input.setPlaceholderText("🔍 Search by email, ID or status...")
+        self.search_input.setPlaceholderText(_('search_placeholder'))
         self.search_input.setStyleSheet("""
             QLineEdit {
                 background-color: #2a2b37;
@@ -594,10 +661,10 @@ class MainWindow(QMainWindow):
         self.search_input.textChanged.connect(self.load_accounts)
         search_layout.addWidget(self.search_input, 3)
         
-        # Filter dropdown
-        self.filter_combo = QComboBox()
-        self.filter_combo.addItems(["All Accounts", "Active Only", "Expired Only", "Banned Only", "Healthy Only"])
-        self.filter_combo.setStyleSheet("""
+        # 语言选择下拉框
+        self.language_combo = QComboBox()
+        self.language_combo.addItems(["🇺🇸 English", "🇨🇳 中文"])
+        self.language_combo.setStyleSheet("""
             QComboBox {
                 background-color: #2a2b37;
                 color: #e0e0e0;
@@ -605,7 +672,7 @@ class MainWindow(QMainWindow):
                 border-radius: 4px;
                 padding: 8px;
                 font-size: 14px;
-                min-width: 150px;
+                min-width: 120px;
             }
             QComboBox::drop-down {
                 border: none;
@@ -626,8 +693,17 @@ class MainWindow(QMainWindow):
                 border: 1px solid #3a3b47;
             }
         """)
-        self.filter_combo.currentIndexChanged.connect(self.load_accounts)
-        search_layout.addWidget(self.filter_combo, 1)
+        # 设置默认选中的语言
+        from src.config.languages import get_language_manager
+        lang_manager = get_language_manager()
+        current_lang = lang_manager.get_current_language()
+        if current_lang == 'zh':
+            self.language_combo.setCurrentIndex(1)  # 中文
+        else:
+            self.language_combo.setCurrentIndex(0)  # English
+        
+        self.language_combo.currentIndexChanged.connect(self.change_language)
+        search_layout.addWidget(self.language_combo, 0)  # 不伸缩，固定宽度
         
         search_layout.addStretch()
         layout.addLayout(search_layout)
@@ -675,7 +751,7 @@ class MainWindow(QMainWindow):
         # Help button on the right
         self.help_button = QPushButton('Help')
         self.help_button.setFixedHeight(36)  # Compatible with modern button height
-        self.help_button.setToolTip("Help and User Guide")
+        self.help_button.setToolTip(_('help_tooltip'))
         self.help_button.clicked.connect(self.show_help_dialog)
         button_layout.addWidget(self.help_button)
 
@@ -725,9 +801,51 @@ class MainWindow(QMainWindow):
         central_widget.setLayout(layout)
 
     def load_accounts(self, preserve_limits=False):
-        """Load accounts to table"""
+        """Load accounts to table with search functionality"""
         # 使用新方法获取包含创建时间的完整信息
-        accounts = self.account_manager.get_accounts_with_all_info()
+        all_accounts = self.account_manager.get_accounts_with_all_info()
+        
+        # 获取搜索文字
+        search_text = self.search_input.text().lower().strip() if hasattr(self, 'search_input') else ''
+        
+        # 过滤账号
+        if search_text:
+            accounts = []
+            for account in all_accounts:
+                account_id, email, account_json, health_status, created_at, limit_info = account
+                
+                # 搜索匹配条件：邮箱、ID、状态、使用量
+                search_fields = [
+                    str(account_id).lower(),
+                    email.lower(),
+                    health_status.lower() if health_status else '',
+                    limit_info.lower() if limit_info else ''
+                ]
+                
+                # 尝试解析状态信息进行搜索
+                try:
+                    if health_status == 'banned':
+                        search_fields.append('banned')
+                    else:
+                        account_data = json.loads(account_json)
+                        expiration_time = account_data['stsTokenManager']['expirationTime']
+                        if isinstance(expiration_time, str):
+                            expiration_time = int(expiration_time)
+                        current_time = int(time.time() * 1000)
+                        
+                        if current_time >= expiration_time:
+                            search_fields.append('expired')
+                            search_fields.append('token expired')
+                        else:
+                            search_fields.append('active')
+                except:
+                    search_fields.append('error')
+                
+                # 检查是否匹配搜索文字
+                if any(search_text in field for field in search_fields):
+                    accounts.append(account)
+        else:
+            accounts = all_accounts
 
         self.table.setRowCount(len(accounts))
         active_account = self.account_manager.get_active_account()
@@ -1528,17 +1646,56 @@ class MainWindow(QMainWindow):
         self.token_worker = None
 
     def _complete_account_activation(self, email):
-        """Simple account activation like old version"""
+        """账号激活并检查Warp进程"""
         try:
             if self.account_manager.set_active_account(email):
                 self.load_accounts(preserve_limits=True)
                 self.status_bar.showMessage(f"Account activated: {email}", 3000)
                 # Simple notification to proxy script
                 self.notify_proxy_active_account_change()
+                
+                # 激活成功后检查Warp进程状态
+                self._check_and_start_warp_if_needed(email)
             else:
                 self.status_bar.showMessage("Account activation failed", 3000)
         except Exception as e:
             self.status_bar.showMessage(f"Account activation error: {str(e)}", 5000)
+    
+    def _check_and_start_warp_if_needed(self, email):
+        """检查Warp进程状态，如果没有运行则启动"""
+        try:
+            # 导入warp_manager
+            from src.utils.warp_util import warp_manager
+            
+            # 检查Warp是否运行
+            if not warp_manager.is_warp_running():
+                print(f"🔎 Warp is not running after account activation, starting Warp for {email}...")
+                self.show_status_message(f"🚀 Starting Warp for {email}...", 3000)
+                
+                # 尝试启动Warp
+                if warp_manager.start_warp(wait_for_startup=True):
+                    # 等待一下确保完全启动
+                    import time
+                    time.sleep(2)
+                    
+                    # 再次检查确认
+                    if warp_manager.is_warp_running():
+                        print(f"✅ Warp started successfully for account {email}")
+                        self.show_status_message(f"✅ Warp started with {email}", 4000)
+                    else:
+                        print(f"⚠️ Warp start command executed but process not confirmed for {email}")
+                        self.show_status_message(f"⚠️ Warp may not have started properly", 4000)
+                else:
+                    print(f"❌ Failed to start Warp for account {email}")
+                    self.show_status_message(f"❌ Failed to start Warp, please start manually", 4000)
+            else:
+                print(f"ℹ️ Warp is already running with account {email}")
+                # 不显示状态消息，因为这是正常情况
+                
+        except ImportError:
+            print("⚠️ warp_util module not available, skipping Warp process check")
+        except Exception as e:
+            print(f"⚠️ Error checking/starting Warp process: {e}")
 
 
     def fetch_and_save_user_settings(self, email):
@@ -2045,7 +2202,7 @@ class MainWindow(QMainWindow):
                 'refresh_token': refresh_token
             }
 
-            # Direct connection - completely bypass proxy
+            # Direct connection - skip SSL verification
             response = requests.post(url, json=data, headers=headers, timeout=30, verify=False)
 
             if response.status_code == 200:
@@ -2129,8 +2286,8 @@ class MainWindow(QMainWindow):
 
             print(f"🔄 Refreshing active account: {active_email}")
 
-            # Get account information
-            accounts_with_health = self.account_manager.get_accounts_with_health_and_limits()
+            # Get account information (use cache for better performance)
+            accounts_with_health = self._get_cached_accounts()
             active_account_data = None
             health_status = None
 
@@ -2179,90 +2336,36 @@ class MainWindow(QMainWindow):
         except Exception as e:
             print(f"Active account refresh completion error: {e}")
 
-    def _auto_switch_account(self, exhausted_email):
+    def _auto_switch_account(self, email_with_reason):
         """自动切换到下一个健康账号 - 按创建时间顺序"""
         try:
-            print(f"🔄 Auto-switching from exhausted account: {exhausted_email}")
+            # 解析邮箱和切换原因
+            if '|' in email_with_reason:
+                exhausted_email, switch_reason = email_with_reason.split('|', 1)
+            else:
+                exhausted_email = email_with_reason
+                switch_reason = "unknown"
             
-            # 先删除已用完的账号（余量为0）
-            print(f"🗑️ Checking if account {exhausted_email} should be deleted...")
+            print(f"🔄 Auto-switching from account: {exhausted_email} (reason: {switch_reason})")
             
-            # 确保账号确实需要删除（余量必须为0）
-            should_delete = False
-            accounts_to_check = self.account_manager.get_accounts_with_health_and_limits()
-            for email, _, _, limit_info in accounts_to_check:
-                if email == exhausted_email:
-                    if limit_info and '/' in limit_info:
-                        try:
-                            used, total = map(int, limit_info.split('/'))
-                            remaining = total - used
-                            print(f"📊 Account {email}: used {used}/{total}, remaining: {remaining}")
-                            
-                            # 只有余量为0时才删除
-                            if remaining == 0:
-                                should_delete = True
-                                print(f"✅ Account {email} has 0 remaining quota, will delete")
-                            else:
-                                print(f"⚠️ Account {email} still has {remaining} requests left, not deleting")
-                        except Exception as e:
-                            print(f"⚠️ Error parsing limit info: {e}, not deleting")
-                    else:
-                        print(f"⚠️ No limit info for {email}, not deleting")
-                    break
+            # 根据切换原因决定是否删除账号
+            should_delete = switch_reason in ['banned_only', 'banned_and_exhausted']
             
             if should_delete:
-                # 执行删除
-                print(f"🗑️ Deleting account from database: {exhausted_email}")
+                print(f"🗑️ Deleting banned account: {exhausted_email}")
                 delete_success = self.account_manager.delete_account(exhausted_email)
                 
                 if delete_success:
-                    print(f"✅ Account {exhausted_email} deleted from database successfully")
-                    
-                    # 立即更新UI表格，移除已删除的账号
-                    removed_from_ui = False
-                    for row in range(self.table.rowCount() - 1, -1, -1):
-                        email_item = self.table.item(row, 1)
-                        if email_item and email_item.text() == exhausted_email:
-                            self.table.removeRow(row)
-                            removed_from_ui = True
-                            print(f"✅ Removed {exhausted_email} from UI table (row {row})")
-                            break
-                    
-                    if not removed_from_ui:
-                        print(f"⚠️ Account {exhausted_email} was not found in UI table")
-                    
-                    self.show_status_message(f"🗑️ Deleted exhausted account: {exhausted_email}", 5000)
+                    print(f"✅ Banned account {exhausted_email} deleted from database")
+                    self.show_status_message(f"🗑️ Deleted banned: {exhausted_email}", 3000)
                 else:
-                    print(f"❌ Failed to delete account {exhausted_email} from database")
-                    self.show_status_message(f"❌ Failed to delete {exhausted_email}", 5000)
+                    print(f"❌ Failed to delete banned account {exhausted_email}")
+            else:
+                print(f"🔄 Keeping exhausted account {exhausted_email} for quota reset (reason: {switch_reason})")
+                self.show_status_message(f"🔄 Switching from {exhausted_email} (keeping for reset)", 3000)
             
-            # 导入 Warp 进程管理器
-            from src.utils.warp_util import warp_manager
-            
-            # 获取所有账号（按创建时间顺序）
-            accounts_with_health = self.account_manager.get_accounts_with_health_and_limits()
-            available_accounts = []
-            
-            # 使用与检查时相同的智能判断逻辑
-            estimated_consumption = 15  # 15秒内预计消耗15个请求
-            
-            for email, account_json, health_status, limit_info in accounts_with_health:
-                if health_status == 'healthy' and email != exhausted_email:
-                    # 检查是否还有足够的额度支撑至少一个检查周期
-                    if limit_info and '/' in limit_info:
-                        try:
-                            used, total = map(int, limit_info.split('/'))
-                            remaining = total - used
-                            # 只选择有足够额度支撑下一个检查周期的账号
-                            if remaining > estimated_consumption:
-                                # 不排序，保持数据库中的顺序（创建时间顺序）
-                                available_accounts.append((email, remaining))
-                        except:
-                            # 如果无法解析限制信息，仍然添加到可用列表（假设有足够额度）
-                            available_accounts.append((email, 999))
-                    else:
-                        # 如果没有限制信息，也添加到可用列表（假设有足够额度）
-                        available_accounts.append((email, 999))
+            # 获取下一个可用账号
+            available_accounts = self._find_available_accounts(exhausted_email)
             
             if available_accounts:
                 # 选择第一个可用账号（最早创建的）
@@ -2270,62 +2373,15 @@ class MainWindow(QMainWindow):
                 next_remaining = available_accounts[0][1]
                 
                 print(f"✅ Found {len(available_accounts)} available accounts, switching to: {next_email} (remaining: {next_remaining})")
-                self.show_status_message(f"🔄 Auto-switching to {next_email}", 5000)
                 
-                # 1. 先关闭 Warp 应用
-                print("🛑 Closing Warp application before switching account...")
-                if warp_manager.is_warp_running():
-                    if warp_manager.stop_warp():
-                        print("✅ Warp closed successfully")
-                        # 验证 Warp 确实已关闭
-                        import time
-                        max_wait = 10  # 最多等待10秒
-                        for i in range(max_wait):
-                            if not warp_manager.is_warp_running():
-                                print(f"✅ Warp process confirmed closed after {i+1} seconds")
-                                break
-                            time.sleep(1)
-                        else:
-                            print("⚠️ Warp process still running after 10 seconds, forcing kill...")
-                            warp_manager.stop_warp(force=True)
-                            time.sleep(2)
-                    else:
-                        print("⚠️ Failed to close Warp gracefully, trying force kill...")
-                        warp_manager.stop_warp(force=True)
-                        time.sleep(2)
-                else:
-                    print("ℹ️ Warp is not running, no need to close")
-                
-                # 2. 再次确认 Warp 已关闭
-                import time
-                if warp_manager.is_warp_running():
-                    print("❌ Warp is still running, aborting account switch")
-                    self.show_status_message("❌ Failed to close Warp for account switch", 5000)
-                    return
-                
-                # 3. 切换到新账号
-                print(f"🔄 Switching active account to: {next_email}")
+                # 直接切换到新账号（不重启Warp进程）
                 self._complete_account_activation(next_email)
-                time.sleep(1)  # 给系统一点时间更新配置
                 
-                # 4. 重新打开 Warp 应用
-                print("🚀 Starting Warp application with new account...")
-                if not warp_manager.is_warp_running():
-                    if warp_manager.start_warp(wait_for_startup=True):
-                        # 再次验证 Warp 确实已启动
-                        time.sleep(3)  # 额外等待确保完全启动
-                        if warp_manager.is_warp_running():
-                            print("✅ Warp restarted and confirmed running with new account")
-                            self.show_status_message(f"✅ Switched to {next_email} and Warp is running", 5000)
-                        else:
-                            print("⚠️ Warp start command executed but process not detected")
-                            self.show_status_message("⚠️ Warp may not have started properly, please check", 5000)
-                    else:
-                        print("❌ Failed to start Warp")
-                        self.show_status_message("❌ Failed to start Warp, please start it manually", 5000)
-                else:
-                    print("⚠️ Warp is already running (unexpected)")
-                    self.show_status_message(f"⚠️ Warp already running, switched to {next_email}", 5000)
+                # 给系统一点时间更新配置
+                time.sleep(1)
+                
+                print(f"✅ Account switched to {next_email} (no Warp restart)")
+                self.show_status_message(f"✅ Switched to {next_email}", 4000)
             else:
                 print("⚠️ No healthy accounts available for switching")
                 self.show_status_message("⚠️ All accounts exhausted or unhealthy!", 8000)
@@ -2333,10 +2389,73 @@ class MainWindow(QMainWindow):
         except Exception as e:
             print(f"Auto-switch error: {e}")
             self.show_status_message(f"❌ Auto-switch failed: {str(e)}", 5000)
+    
+    def _find_available_accounts(self, excluded_email):
+        """查找可用账号（按创建时间顺序）"""
+        accounts_with_health = self.account_manager.get_accounts_with_health_and_limits()
+        available_accounts = []
+        estimated_consumption = 15  # 15秒内预计消老15个请求
+        
+        for email, account_json, health_status, limit_info in accounts_with_health:
+            if health_status == 'healthy' and email != excluded_email:
+                # 检查是否还有足够的额度支撑至少一个检查周期
+                if limit_info and '/' in limit_info:
+                    try:
+                        used, total = map(int, limit_info.split('/'))
+                        remaining = total - used
+                        # 只选择有足够额度支撑下一个检查周期的账号
+                        if remaining > estimated_consumption:
+                            available_accounts.append((email, remaining))
+                    except:
+                        # 如果无法解析限制信息，仍然添加到可用列表
+                        available_accounts.append((email, 999))
+                else:
+                    # 如果没有限制信息，也添加到可用列表
+                    available_accounts.append((email, 999))
+        
+        return available_accounts
+
+    def cleanup_exhausted_accounts(self):
+        """清理被封禁的账号（保留只是用完额度的账号等待重置）"""
+        try:
+            # Use cached data to avoid repeated database queries
+            accounts = self._get_cached_accounts()
+            deleted_count = 0
+            deleted_emails = []
+            active_account = self.account_manager.get_active_account()
+            
+            for email, _, health_status, limit_info in accounts:
+                # 跳过活动账号（让auto_switch处理）
+                if email == active_account:
+                    continue
+                
+                # 只删除被封禁的账号，保留用完额度的账号等待重置
+                if health_status == 'banned':
+                    print(f"🗑️ Auto-deleting banned account: {email}")
+                    if self.account_manager.delete_account(email):
+                        deleted_count += 1
+                        deleted_emails.append(f"{email}(banned)")
+            
+            if deleted_count > 0:
+                print(f"✅ Auto-cleaned {deleted_count} banned accounts: {', '.join(deleted_emails)}")
+                self.show_status_message(f"🗑️ Deleted {deleted_count} banned accounts", 5000)
+                # Invalidate cache since data changed
+                self._invalidate_accounts_cache()
+                # 刷新表格
+                self.load_accounts(preserve_limits=True)
+            
+            return deleted_count
+                
+        except Exception as e:
+            print(f"Cleanup exhausted accounts error: {e}")
+            return 0
 
     def auto_renew_tokens(self):
         """Automatic token renewal - runs once per minute using background worker"""
         try:
+            # 清理被封禁的账号（保留用完额度的账号等待重置）
+            self.cleanup_exhausted_accounts()
+            
             # Check if a renewal is already in progress
             if hasattr(self, 'token_renewal_worker') and self.token_renewal_worker and self.token_renewal_worker.isRunning():
                 print("⚠️ Token renewal already in progress, skipping...")
@@ -2481,33 +2600,188 @@ class MainWindow(QMainWindow):
         # Start reset timer
         if timeout > 0:
             self.status_reset_timer.start(timeout)
+    
+    def change_language(self, index):
+        """切换语言"""
+        from src.config.languages import get_language_manager
+        lang_manager = get_language_manager()
+        
+        if index == 0:  # English
+            lang_manager.set_language('en')
+        elif index == 1:  # 中文
+            lang_manager.set_language('zh')
+        
+        # 刷新UI文字
+        self.refresh_ui_texts()
+        
+        # 显示切换成功消息
+        if index == 0:
+            self.show_status_message("Language switched to English", 2000)
+        else:
+            self.show_status_message("语言切换为中文", 2000)
 
     def show_help_dialog(self):
-        """Open Telegram for help"""
-        import webbrowser
-        webbrowser.open("https://t.me/warp5215")
+        """显示联系我们的对话框"""
+        from PyQt5.QtWidgets import QDialog, QVBoxLayout, QLabel, QHBoxLayout, QPushButton, QTextEdit
+        from PyQt5.QtCore import Qt
+        from PyQt5.QtGui import QFont, QDesktopServices
+        from PyQt5.QtCore import QUrl
+        
+        dialog = QDialog(self)
+        dialog.setWindowTitle(_('contact_us_title'))
+        dialog.setFixedSize(580, 420)
+        dialog.setModal(True)
+        
+        # 设置对话框样式
+        dialog.setStyleSheet("""
+            QDialog {
+                background: qlineargradient(x1: 0, y1: 0, x2: 0, y2: 1,
+                                          stop: 0 #2d3748, stop: 1 #1a202c);
+                border-radius: 12px;
+            }
+            QLabel {
+                color: #e2e8f0;
+                font-size: 14px;
+                line-height: 1.4;
+            }
+            QLabel#title {
+                color: #63b3ed;
+                font-size: 20px;
+                font-weight: bold;
+                margin: 10px 0;
+            }
+            QLabel#description {
+                color: #a0aec0;
+                font-size: 13px;
+                padding: 10px;
+                background-color: rgba(255, 255, 255, 0.05);
+                border-radius: 8px;
+                border-left: 4px solid #63b3ed;
+            }
+            QPushButton {
+                background: qlineargradient(x1: 0, y1: 0, x2: 0, y2: 1,
+                                          stop: 0 #4299e1, stop: 1 #3182ce);
+                color: #ffffff;
+                border: none;
+                padding: 12px 20px;
+                border-radius: 6px;
+                font-size: 13px;
+                font-weight: 500;
+                margin: 3px 0;
+            }
+            QPushButton:hover {
+                background: qlineargradient(x1: 0, y1: 0, x2: 0, y2: 1,
+                                          stop: 0 #63b3ed, stop: 1 #4299e1);
+                transform: translateY(-1px);
+            }
+            QPushButton:pressed {
+                background: qlineargradient(x1: 0, y1: 0, x2: 0, y2: 1,
+                                          stop: 0 #3182ce, stop: 1 #2c5282);
+            }
+            QPushButton#closeBtn {
+                background: qlineargradient(x1: 0, y1: 0, x2: 0, y2: 1,
+                                          stop: 0 #718096, stop: 1 #4a5568);
+                margin-top: 15px;
+            }
+            QPushButton#closeBtn:hover {
+                background: qlineargradient(x1: 0, y1: 0, x2: 0, y2: 1,
+                                          stop: 0 #a0aec0, stop: 1 #718096);
+            }
+        """)
+        
+        layout = QVBoxLayout()
+        layout.setSpacing(20)
+        layout.setContentsMargins(30, 25, 30, 25)
+        
+        # 标题
+        title_label = QLabel(_('contact_us_header'))
+        title_label.setObjectName("title")
+        title_label.setAlignment(Qt.AlignCenter)
+        layout.addWidget(title_label)
+        
+        # 描述信息
+        description = QLabel(_('contact_description'))
+        description.setObjectName("description")
+        description.setWordWrap(True)
+        description.setAlignment(Qt.AlignLeft)
+        layout.addWidget(description)
+        
+        # 联系方式列表
+        contact_info = QLabel(
+            _('contact_channel_desc') + "<br><br>" +
+            _('contact_chat_desc') + "<br><br>" +
+            _('contact_github_desc')
+        )
+        contact_info.setWordWrap(True)
+        contact_info.setAlignment(Qt.AlignLeft)
+        layout.addWidget(contact_info)
+        
+        # 按钮区域
+        buttons_layout = QVBoxLayout()
+        buttons_layout.setSpacing(10)
+        
+        # Telegram Channel 按钮
+        channel_btn = QPushButton(_('contact_telegram_channel'))
+        channel_btn.clicked.connect(lambda: QDesktopServices.openUrl(QUrl("https://t.me/warp5215")))
+        channel_btn.setCursor(Qt.PointingHandCursor)
+        buttons_layout.addWidget(channel_btn)
+        
+        # Telegram Chat 按钮
+        chat_btn = QPushButton(_('contact_telegram_chat'))
+        chat_btn.clicked.connect(lambda: QDesktopServices.openUrl(QUrl("https://t.me/warp1215")))
+        chat_btn.setCursor(Qt.PointingHandCursor)
+        buttons_layout.addWidget(chat_btn)
+        
+        # GitHub 按钮
+        github_btn = QPushButton(_('contact_github_repo'))
+        github_btn.clicked.connect(lambda: QDesktopServices.openUrl(QUrl("https://github.com/hj01857655/WARP_reg_and_manager")))
+        github_btn.setCursor(Qt.PointingHandCursor)
+        buttons_layout.addWidget(github_btn)
+        
+        layout.addLayout(buttons_layout)
+        
+        # 分隔线
+        separator = QLabel()
+        separator.setFixedHeight(1)
+        separator.setStyleSheet("background-color: rgba(255, 255, 255, 0.1); margin: 10px 0;")
+        layout.addWidget(separator)
+        
+        # 关闭按钮
+        close_btn = QPushButton(_('contact_close'))
+        close_btn.setObjectName("closeBtn")
+        close_btn.clicked.connect(dialog.accept)
+        close_btn.setCursor(Qt.PointingHandCursor)
+        layout.addWidget(close_btn)
+        
+        dialog.setLayout(layout)
+        dialog.exec_()
 
     def refresh_ui_texts(self):
-        """Update UI texts to English"""
+        """更新UI文字"""
         # Window title
-        self.setWindowTitle('Warp Account Manager')
+        self.setWindowTitle(_('app_title'))
 
         # Buttons
-        self.proxy_start_button.setText('Start Proxy' if not self.proxy_enabled else 'Proxy Active')
-        self.proxy_stop_button.setText('Stop Proxy')
-        self.add_account_button.setText('Add Account')
-        self.refresh_limits_button.setText('Refresh Limits')
-        self.help_button.setText('Help')
+        self.proxy_start_button.setText(_('proxy_start') if not self.proxy_enabled else _('proxy_active'))
+        self.proxy_stop_button.setText(_('proxy_stop'))
+        self.add_account_button.setText(_('add_account'))
+        self.create_account_button.setText(_('auto_add_account'))
+        self.refresh_limits_button.setText(_('refresh_limits'))
+        self.help_button.setText(_('help'))
+        self.help_button.setToolTip(_('help_tooltip'))
 
+        # Search placeholder
+        self.search_input.setPlaceholderText(_('search_placeholder'))
+        
         # Table headers
-        self.table.setHorizontalHeaderLabels(['Current', 'Email', 'Status', 'Limit'])
+        self.table.setHorizontalHeaderLabels(['ID', _('email'), _('status'), _('limit'), _('created'), 'Action'])
 
         # Status bar
         debug_mode = os.path.exists("debug.txt")
         if debug_mode:
-            self.status_bar.showMessage('Enable proxy and click start button on accounts to begin usage. (Debug mode active)')
+            self.status_bar.showMessage(_('default_status_debug'))
         else:
-            self.status_bar.showMessage('Enable proxy and click start button on accounts to begin usage.')
+            self.status_bar.showMessage(_('default_status'))
 
         # Reload table
         self.load_accounts(preserve_limits=True)

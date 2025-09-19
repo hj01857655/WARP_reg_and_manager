@@ -34,7 +34,7 @@ class MitmProxyManager:
         """Start Mitmproxy"""
         try:
             if self.is_running():
-                print("Mitmproxy zaten çalışıyor")
+                print("Mitmproxy is already running")
                 return True
 
             # First, check if mitmproxy is properly installed
@@ -66,10 +66,10 @@ class MitmProxyManager:
                     temp_process.terminate()
                     temp_process.wait(timeout=3)
 
-                    print("✅ Создание сертификата завершено")
+                    print("✅ Certificate creation completed")
 
                 except Exception as e:
-                    print(f"❌ Ошибка создания сертификата: {e}")
+                    print(f"❌ Certificate creation error: {e}")
 
                 # Check if certificate was created
                 if not self.cert_manager.check_certificate_exists():
