@@ -26,6 +26,9 @@ from src.managers.certificate_manager import CertificateManager, ManualCertifica
 from src.workers.background_workers import TokenWorker, TokenRefreshWorker, AccountCreationWorker
 from src.managers.mitmproxy_manager import MitmProxyManager
 from src.ui.ui_dialogs import AddAccountDialog
+from src.ui.sidebar_widget import SidebarWidget
+from src.ui.home_page import HomePage
+from src.ui.about_page import AboutPage
 from src.utils.utils import load_stylesheet, get_os_info, is_port_open
 from src.utils.account_processor import AccountProcessor
 
@@ -50,7 +53,7 @@ from PyQt5.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, QH
                              QDialog, QTextEdit, QDialogButtonBox, QStatusBar,
                              QHeaderView, QProgressDialog, QMenu, QAction,
                              QAbstractItemView, QDesktopWidget, QLabel, QLineEdit,
-                             QComboBox, QFrame)
+                             QComboBox, QFrame, QStackedWidget, QSplitter)
 from PyQt5.QtCore import Qt, pyqtSignal, QThread, QTimer
 from PyQt5.QtGui import QFont
 
@@ -159,8 +162,78 @@ class ActiveAccountRefreshWorker(QThread):
             print(f"Token update error: {e}")
             return False
     
+    def _update_active_account_usage_only(self, email, account_data, health_status):
+        """Update usage info for active account monitoring - with smart next_refresh_time handling"""
+        try:
+            # Get limit information via API
+            limit_info = self._get_account_limit_info(account_data)
+            if limit_info and isinstance(limit_info, dict):
+                used = limit_info.get('requestsUsedSinceLastRefresh', 0)
+                total = limit_info.get('requestLimit', 0)
+                limit_text = f"{used}/{total}"
+                
+                # Always update usage info in database
+                self.account_manager.update_account_limit_info(email, limit_text)
+                
+                # Smart handling of next_refresh_time: only update if not exists in DB
+                next_refresh_time = limit_info.get('nextRefreshTime')
+                if next_refresh_time:
+                    # Check if account already has next_refresh_time in database
+                    accounts_with_full_info = self.account_manager.get_accounts_with_all_info()
+                    account_has_expiry = False
+                    
+                    for account_info in accounts_with_full_info:
+                        if account_info[1] == email:  # email is at index 1
+                            existing_refresh_time = account_info[5]  # next_refresh_time is at index 5
+                            if existing_refresh_time:  # If already has a next_refresh_time
+                                account_has_expiry = True
+                            break
+                    
+                    # Only update next_refresh_time if account doesn't have one (new account or missing data)
+                    if not account_has_expiry:
+                        self.account_manager.update_account_next_refresh_time(email, next_refresh_time)
+                        print(f"✅ Updated expiry time for {email}: {next_refresh_time[:19]}")
+                
+                # Check if account has reached limit and auto-switch
+                remaining = total - used if total > 0 else float('inf')
+                
+                # 根据不同情况判断是否需要切换
+                should_switch = False
+                switch_reason = ""
+                
+                # 检查是否为被封禁账号
+                is_banned = (health_status == 'banned')
+                
+                if remaining == 0 and total > 0:
+                    should_switch = True
+                    if is_banned:
+                        switch_reason = "banned_and_exhausted"
+                        print(f"🔴 Account {email} is banned and has 0 remaining quota ({used}/{total}) - will auto-switch")
+                    else:
+                        switch_reason = "exhausted_only"
+                        print(f"⚪ Account {email} has 0 remaining quota ({used}/{total}) - will auto-switch")
+                elif is_banned:
+                    should_switch = True
+                    switch_reason = "banned_only"
+                    print(f"🚫 Account {email} is banned ({used}/{total}) - will auto-switch")
+                elif remaining > 0 and remaining <= 10:
+                    # 余量少于10个时提醒但不切换
+                    print(f"⚠️ Account {email} has only {remaining} requests left ({used}/{total})")
+                else:
+                    # 正常情况不输出日志，减少噪音
+                    pass
+                
+                if should_switch:
+                    print(f"📢 Auto-switching from: {email} (reason: {switch_reason})")
+                    self.auto_switch_to_next_account.emit(f"{email}|{switch_reason}")
+            else:
+                print(f"❌ Failed to get usage info: {email}")
+                
+        except Exception as e:
+            print(f"Usage monitoring error: {e}")
+    
     def _update_active_account_limit(self, email):
-        """Update active account limit information"""
+        """Full update of active account limit information (including nextRefreshTime)"""
         try:
             # Define check parameters
             check_interval = 19  # Check interval in seconds
@@ -181,6 +254,11 @@ class ActiveAccountRefreshWorker(QThread):
                         used = limit_info.get('requestsUsedSinceLastRefresh', 0)
                         total = limit_info.get('requestLimit', 0)
                         limit_text = f"{used}/{total}"
+                        
+                        # Update nextRefreshTime if available (only in full refresh)
+                        next_refresh_time = limit_info.get('nextRefreshTime')
+                        if next_refresh_time:
+                            self.account_manager.update_account_next_refresh_time(email, next_refresh_time)
 
                         self.account_manager.update_account_limit_info(email, limit_text)
                         print(f"✅ Active account limit updated: {email} - {limit_text}")
@@ -226,6 +304,66 @@ class ActiveAccountRefreshWorker(QThread):
                     break
         except Exception as e:
             print(f"Limit update error: {e}")
+    
+    def _fetch_new_account_data(self, email, account_data):
+        """Fetch initial usage and expiry data for newly added account"""
+        try:
+            print(f"🔄 Fetching initial data for new account: {email}")
+            
+            # Validate token expiration before API call
+            try:
+                expiration_time = account_data['stsTokenManager']['expirationTime']
+                if isinstance(expiration_time, str):
+                    expiration_time = int(expiration_time)
+                current_time = int(time.time() * 1000)
+                
+                if current_time >= expiration_time:
+                    print(f"⚠️ Token expired for {email}, skipping API call")
+                    # Set default values for expired token
+                    self.account_manager.update_account_limit_info(email, "Token expired")
+                    return
+                    
+            except (KeyError, ValueError) as e:
+                print(f"⚠️ Invalid token data for {email}: {e}")
+                return
+            
+            # Get limit information via API
+            limit_info = self._get_account_limit_info(account_data)
+            if limit_info and isinstance(limit_info, dict):
+                # Update usage info
+                used = limit_info.get('requestsUsedSinceLastRefresh', 0)
+                total = limit_info.get('requestLimit', 0)
+                limit_text = f"{used}/{total}"
+                self.account_manager.update_account_limit_info(email, limit_text)
+                
+                # Update next_refresh_time (expiry) - only if available
+                next_refresh_time = limit_info.get('nextRefreshTime')
+                if next_refresh_time:
+                    self.account_manager.update_account_next_refresh_time(email, next_refresh_time)
+                    print(f"✅ Initial data updated for {email}: {limit_text}, expires: {next_refresh_time[:19]}")
+                else:
+                    print(f"✅ Usage updated for {email}: {limit_text} (no expiry time available)")
+                    
+            else:
+                print(f"⚠️ Failed to get initial data for {email} - API returned no data")
+                # Set default value to indicate API call failed
+                self.account_manager.update_account_limit_info(email, "API failed")
+                
+        except Exception as e:
+            print(f"❌ Error fetching new account data for {email}: {e}")
+            # Set error status in database
+            self.account_manager.update_account_limit_info(email, "Error")
+    
+    def _get_next_refresh_time(self, account_data):
+        """Get nextRefreshTime from account data via API"""
+        try:
+            limit_info = self._get_account_limit_info(account_data)
+            if limit_info and isinstance(limit_info, dict):
+                return limit_info.get('nextRefreshTime')
+            return None
+        except Exception as e:
+            print(f"Error getting nextRefreshTime: {e}")
+            return None
     
     def _get_account_limit_info(self, account_data):
         """Get account limit information from Warp API"""
@@ -435,10 +573,10 @@ class MainWindow(QMainWindow):
         self.token_renewal_timer.timeout.connect(self.auto_renew_tokens)
         self.token_renewal_timer.start(60000)  # Check every 1 minute (60000 ms)
 
-        # Timer for active account refresh (optimized frequency)
+        # Timer for active account usage monitoring (for auto-switching)
         self.active_account_refresh_timer = QTimer()
-        self.active_account_refresh_timer.timeout.connect(self.refresh_active_account)
-        self.active_account_refresh_timer.start(30000)  # Refresh active account every 30 seconds (increased from 20s)
+        self.active_account_refresh_timer.timeout.connect(self.refresh_active_account_usage)
+        self.active_account_refresh_timer.start(20000)  # Monitor usage every 20 seconds for smart auto-switching
 
         # Timer for status message reset
         self.status_reset_timer = QTimer()
@@ -610,7 +748,8 @@ class MainWindow(QMainWindow):
 
     def init_ui(self):
         self.setWindowTitle(_('app_title'))
-        self.setFixedSize(1100, 700)  # Even wider window for better visibility
+        self.setMinimumSize(1300, 800)  # Larger window for sidebar + content
+        self.resize(1400, 900)  # Default size
 
         # Add status bar
         self.status_bar = QStatusBar()
@@ -629,14 +768,80 @@ class MainWindow(QMainWindow):
         else:
             self.status_bar.showMessage(_('default_status'))
 
-        # Ana widget
+        # Central widget with splitter
         central_widget = QWidget()
         self.setCentralWidget(central_widget)
 
-        # Main layout - Modern spacing with optimized margins
+        # Main layout with horizontal splitter
+        main_layout = QHBoxLayout()
+        main_layout.setContentsMargins(0, 0, 0, 0)
+        main_layout.setSpacing(0)
+
+        # Create sidebar
+        self.sidebar = SidebarWidget()
+        self.sidebar.menu_selected.connect(self.on_page_changed)
+        main_layout.addWidget(self.sidebar)
+
+        # Create stacked widget for pages
+        self.stacked_widget = QStackedWidget()
+        
+        # Create pages
+        self.create_pages()
+        
+        main_layout.addWidget(self.stacked_widget)
+        central_widget.setLayout(main_layout)
+        
+        # Apply modern stylesheet
+        self.setStyleSheet(self.get_modern_stylesheet())
+    
+    def create_pages(self):
+        """Create and setup all pages"""
+        # Page 0: Home
+        self.home_page = HomePage(self.account_manager)
+        self.home_page.quick_action_requested.connect(self.handle_quick_action)
+        self.stacked_widget.addWidget(self.home_page)
+        
+        # Page 1: Accounts (original interface)
+        self.accounts_page = self.create_accounts_page()
+        self.stacked_widget.addWidget(self.accounts_page)
+        
+        # Page 2: About
+        self.about_page = AboutPage()
+        self.stacked_widget.addWidget(self.about_page)
+        
+        # Set default page to accounts (index 1)
+        self.stacked_widget.setCurrentIndex(1)
+    
+    def on_page_changed(self, index):
+        """Handle page change from sidebar"""
+        self.stacked_widget.setCurrentIndex(index)
+        
+        # Update home page stats when switching to home
+        if index == 0 and hasattr(self, 'home_page'):
+            self.home_page.update_stats()
+            self.home_page.update_proxy_status(self.proxy_enabled)
+    
+    def handle_quick_action(self, action):
+        """Handle quick actions from home page"""
+        if action == "accounts":
+            self.sidebar.select_menu(1)  # Switch to accounts page
+        elif action == "refresh":
+            self.sidebar.select_menu(1)  # Switch to accounts page
+            if hasattr(self, 'refresh_limits'):
+                self.refresh_limits()
+        elif action == "add":
+            self.sidebar.select_menu(1)  # Switch to accounts page
+            if hasattr(self, 'add_account'):
+                self.add_account()
+    
+    def create_accounts_page(self):
+        """Create the accounts management page"""
+        page = QWidget()
+        
+        # Main layout
         layout = QVBoxLayout()
-        layout.setContentsMargins(20, 16, 20, 16)  # Wider horizontal margins
-        layout.setSpacing(14)  # Better spacing between elements
+        layout.setContentsMargins(20, 16, 20, 16)
+        layout.setSpacing(14)
 
         # Search and Language Bar
         search_layout = QHBoxLayout()
@@ -703,54 +908,79 @@ class MainWindow(QMainWindow):
             self.language_combo.setCurrentIndex(0)  # English
         
         self.language_combo.currentIndexChanged.connect(self.change_language)
-        search_layout.addWidget(self.language_combo, 0)  # 不伸缩，固定宽度
+        search_layout.addWidget(self.language_combo, 0)
         
         search_layout.addStretch()
         layout.addLayout(search_layout)
         
-        # Top buttons - modern spacing
+        # Top buttons
         button_layout = QHBoxLayout()
-        button_layout.setSpacing(12)  # Larger spacing between buttons
+        button_layout.setSpacing(12)
 
-        # Proxy buttons - start button is now hidden (merged with account buttons)
+        # Proxy buttons
         self.proxy_start_button = QPushButton(_('proxy_start'))
         self.proxy_start_button.setObjectName("StartButton")
-        self.proxy_start_button.setMinimumHeight(36)  # Taller modern buttons
+        self.proxy_start_button.setMinimumHeight(36)
         self.proxy_start_button.clicked.connect(self.start_proxy)
-        self.proxy_start_button.setVisible(False)  # Now hidden
+        self.proxy_start_button.setVisible(False)
 
         self.proxy_stop_button = QPushButton(_('proxy_stop'))
         self.proxy_stop_button.setObjectName("StopButton")
-        self.proxy_stop_button.setMinimumHeight(36)  # Taller modern buttons
+        self.proxy_stop_button.setMinimumHeight(36)
         self.proxy_stop_button.clicked.connect(self.stop_proxy)
-        self.proxy_stop_button.setVisible(False)  # Initially hidden
+        self.proxy_stop_button.setVisible(False)
 
-        # Other buttons
+        # Primary action buttons
         self.add_account_button = QPushButton(_('add_account'))
         self.add_account_button.setObjectName("AddButton")
-        self.add_account_button.setMinimumHeight(36)  # Taller modern buttons
+        self.add_account_button.setMinimumHeight(36)
         self.add_account_button.clicked.connect(self.add_account)
+
+        self.create_account_button = QPushButton(_('auto_add_account'))
+        self.create_account_button.setObjectName("CreateAccountButton")
+        self.create_account_button.setMinimumHeight(36)
+        self.create_account_button.clicked.connect(self.create_new_account)
 
         self.refresh_limits_button = QPushButton(_('refresh_limits'))
         self.refresh_limits_button.setObjectName("RefreshButton")
-        self.refresh_limits_button.setMinimumHeight(36)  # Taller modern buttons
+        self.refresh_limits_button.setMinimumHeight(36)
         self.refresh_limits_button.clicked.connect(self.refresh_limits)
+        
+        # Batch operation buttons
+        self.delete_banned_button = QPushButton(_('delete_banned'))
+        self.delete_banned_button.setObjectName("DeleteButton")
+        self.delete_banned_button.setMinimumHeight(36)
+        self.delete_banned_button.setToolTip('Delete all banned accounts')
+        self.delete_banned_button.clicked.connect(self.delete_all_banned_accounts)
+        
+        self.refresh_tokens_button = QPushButton(_('refresh_tokens'))
+        self.refresh_tokens_button.setObjectName("RefreshButton")
+        self.refresh_tokens_button.setMinimumHeight(36)
+        self.refresh_tokens_button.setToolTip('Refresh expired tokens for all accounts')
+        self.refresh_tokens_button.clicked.connect(self.refresh_expired_tokens)
 
-        # Account creation button
-        self.create_account_button = QPushButton(_('auto_add_account'))
-        self.create_account_button.setObjectName("CreateAccountButton")
-        self.create_account_button.setMinimumHeight(36)  # Taller modern buttons
-        self.create_account_button.clicked.connect(self.create_new_account)
-
+        # Add buttons to layout
         button_layout.addWidget(self.proxy_stop_button)
         button_layout.addWidget(self.add_account_button)
         button_layout.addWidget(self.create_account_button)
         button_layout.addWidget(self.refresh_limits_button)
+        
+        # Separator
+        separator = QFrame()
+        separator.setFrameShape(QFrame.VLine)
+        separator.setFrameShadow(QFrame.Sunken)
+        separator.setMaximumHeight(30)
+        separator.setStyleSheet("QFrame { color: #4a5568; }")
+        button_layout.addWidget(separator)
+        
+        # Batch operation buttons
+        button_layout.addWidget(self.delete_banned_button)
+        button_layout.addWidget(self.refresh_tokens_button)
         button_layout.addStretch()
 
         # Help button on the right
         self.help_button = QPushButton('Help')
-        self.help_button.setFixedHeight(36)  # Compatible with modern button height
+        self.help_button.setFixedHeight(36)
         self.help_button.setToolTip(_('help_tooltip'))
         self.help_button.clicked.connect(self.show_help_dialog)
         button_layout.addWidget(self.help_button)
@@ -759,50 +989,376 @@ class MainWindow(QMainWindow):
 
         # Table
         self.table = QTableWidget()
-        self.table.setColumnCount(6)  # ID, Email, Status, Usage, Created, Action
-        self.table.setHorizontalHeaderLabels(['ID', 'Email', 'Status', 'Usage', 'Created', 'Action'])
+        self.table.setColumnCount(6)  # ID, Email, Status, Usage, Expires, Action
+        self.table.setHorizontalHeaderLabels(['ID', 'Email', 'Status', 'Usage', 'Expires', 'Action'])
 
-        # Table settings for dark theme compatibility
+        # Table settings
         self.table.setAlternatingRowColors(True)
         self.table.setShowGrid(False)
         self.table.verticalHeader().setVisible(False)
-        self.table.verticalHeader().setDefaultSectionSize(45)  # Taller rows for better readability
+        self.table.verticalHeader().setDefaultSectionSize(45)
         self.table.setSelectionBehavior(QAbstractItemView.SelectRows)
         self.table.setEditTriggers(QAbstractItemView.NoEditTriggers)
         self.table.setFocusPolicy(Qt.NoFocus)
         
-        # Set font size for better readability
         font = QFont()
-        font.setPointSize(10)  # Slightly larger font
+        font.setPointSize(10)
         self.table.setFont(font)
 
         # Add right-click context menu
         self.table.setContextMenuPolicy(Qt.CustomContextMenu)
         self.table.customContextMenuRequested.connect(self.show_context_menu)
 
-        # Table header settings - Optimized for 1100px wide window
+        # Enable sorting
+        self.table.setSortingEnabled(True)
+        
+        # Table header settings
         header = self.table.horizontalHeader()
-        header.setSectionResizeMode(0, QHeaderView.Fixed)  # ID column fixed width
-        header.setSectionResizeMode(1, QHeaderView.Fixed)  # Email column fixed width
-        header.setSectionResizeMode(2, QHeaderView.Fixed)  # Status column fixed width
-        header.setSectionResizeMode(3, QHeaderView.Fixed)  # Usage column fixed width
-        header.setSectionResizeMode(4, QHeaderView.Fixed)  # Created time column fixed width
-        header.setSectionResizeMode(5, QHeaderView.Fixed)  # Action button column fixed width
-        header.resizeSection(0, 50)   # ID column width
-        header.resizeSection(1, 380)  # Email column width
-        header.resizeSection(2, 180)  # Status column width
-        header.resizeSection(3, 100)  # Usage column width
-        header.resizeSection(4, 120)  # Created time column width
-        header.resizeSection(5, 100)  # Action button column width
-        header.setFixedHeight(40)  # Higher modern header
+        header.setSectionResizeMode(0, QHeaderView.Fixed)
+        header.setSectionResizeMode(1, QHeaderView.Fixed)  # 改为固定宽度
+        header.setSectionResizeMode(2, QHeaderView.Fixed)
+        header.setSectionResizeMode(3, QHeaderView.Fixed)
+        header.setSectionResizeMode(4, QHeaderView.Fixed)
+        header.setSectionResizeMode(5, QHeaderView.Fixed)
+        header.resizeSection(0, 60)     # ID
+        header.resizeSection(1, 220)    # 邮箱列适中宽度
+        header.resizeSection(2, 140)    # 状态
+        header.resizeSection(3, 90)     # 用量
+        header.resizeSection(4, 120)    # 账号过期时间
+        header.resizeSection(5, 85)     # 操作按钮
+        header.setFixedHeight(42)
+        
+        header.setDefaultAlignment(Qt.AlignCenter)
+        header_font = QFont()
+        header_font.setPointSize(10)
+        header_font.setBold(True)
+        header.setFont(header_font)
 
         layout.addWidget(self.table)
-
-        central_widget.setLayout(layout)
+        page.setLayout(layout)
+        
+        return page
+    
+    def get_modern_stylesheet(self):
+        """Return modern stylesheet for the application"""
+        return """
+        /* Main window */
+        QMainWindow {
+            background-color: #1e1f29;
+            color: #e0e0e0;
+        }
+        
+        /* Central widget */
+        QWidget {
+            background-color: #1e1f29;
+            color: #e0e0e0;
+        }
+        
+        /* Modern button styles */
+        QPushButton {
+            background-color: qlineargradient(x1:0, y1:0, x2:0, y2:1, 
+                stop:0 #4a5568, stop:1 #2d3748);
+            color: #ffffff;
+            border: 1px solid #2d3748;
+            border-radius: 6px;
+            padding: 8px 16px;
+            font-size: 13px;
+            font-weight: bold;
+            min-width: 80px;
+        }
+        
+        QPushButton:hover {
+            background-color: qlineargradient(x1:0, y1:0, x2:0, y2:1, 
+                stop:0 #5a6c7d, stop:1 #3d4852);
+            border-color: #4a5568;
+        }
+        
+        QPushButton:pressed {
+            background-color: qlineargradient(x1:0, y1:0, x2:0, y2:1, 
+                stop:0 #2d3748, stop:1 #1a202c);
+        }
+        
+        QPushButton:disabled {
+            background-color: #2d3748;
+            color: #666;
+            border-color: #2d3748;
+        }
+        
+        /* Specific button styles */
+        QPushButton#StartButton {
+            background-color: qlineargradient(x1:0, y1:0, x2:0, y2:1, 
+                stop:0 #38a169, stop:1 #2f855a);
+        }
+        
+        QPushButton#StartButton:hover {
+            background-color: qlineargradient(x1:0, y1:0, x2:0, y2:1, 
+                stop:0 #48bb78, stop:1 #38a169);
+        }
+        
+        QPushButton#StopButton {
+            background-color: qlineargradient(x1:0, y1:0, x2:0, y2:1, 
+                stop:0 #e53e3e, stop:1 #c53030);
+        }
+        
+        QPushButton#StopButton:hover {
+            background-color: qlineargradient(x1:0, y1:0, x2:0, y2:1, 
+                stop:0 #f56565, stop:1 #e53e3e);
+        }
+        
+        QPushButton#AddButton, QPushButton#CreateAccountButton {
+            background-color: qlineargradient(x1:0, y1:0, x2:0, y2:1, 
+                stop:0 #4299e1, stop:1 #2b77cb);
+        }
+        
+        QPushButton#AddButton:hover, QPushButton#CreateAccountButton:hover {
+            background-color: qlineargradient(x1:0, y1:0, x2:0, y2:1, 
+                stop:0 #63b3ed, stop:1 #4299e1);
+        }
+        
+        QPushButton#RefreshButton {
+            background-color: qlineargradient(x1:0, y1:0, x2:0, y2:1, 
+                stop:0 #ed8936, stop:1 #c05621);
+        }
+        
+        QPushButton#RefreshButton:hover {
+            background-color: qlineargradient(x1:0, y1:0, x2:0, y2:1, 
+                stop:0 #f6ad55, stop:1 #ed8936);
+        }
+        
+        QPushButton#DeleteButton {
+            background-color: qlineargradient(x1:0, y1:0, x2:0, y2:1, 
+                stop:0 #e53e3e, stop:1 #c53030);
+        }
+        
+        QPushButton#DeleteButton:hover {
+            background-color: qlineargradient(x1:0, y1:0, x2:0, y2:1, 
+                stop:0 #f56565, stop:1 #e53e3e);
+        }
+        
+        /* Table styles */
+        QTableWidget {
+            background-color: #2a2b37;
+            alternate-background-color: #2f3041;
+            color: #e0e0e0;
+            selection-background-color: #4a5568;
+            selection-color: #ffffff;
+            border: 1px solid #3a3b47;
+            border-radius: 4px;
+        }
+        
+        QTableWidget::item {
+            padding: 8px;
+            border: none;
+        }
+        
+        QTableWidget::item:selected {
+            background-color: #4a5568;
+        }
+        
+        /* Header styles */
+        QHeaderView::section {
+            background-color: #3a3b47;
+            color: #ffffff;
+            padding: 10px;
+            border: none;
+            border-right: 1px solid #4a4b57;
+            font-weight: bold;
+        }
+        
+        QHeaderView::section:hover {
+            background-color: #4a4b57;
+        }
+        
+        /* Scrollbar styles */
+        QScrollBar:vertical {
+            background-color: #2a2b37;
+            width: 12px;
+            border-radius: 6px;
+        }
+        
+        QScrollBar::handle:vertical {
+            background-color: #4a5568;
+            border-radius: 6px;
+            min-height: 20px;
+        }
+        
+        QScrollBar::handle:vertical:hover {
+            background-color: #5a6c7d;
+        }
+        
+        /* Status bar */
+        QStatusBar {
+            background-color: #2d3748;
+            color: #e0e0e0;
+            border-top: 1px solid #4a5568;
+        }
+        
+        /* Action buttons in table */
+        QPushButton[state="start"] {
+            background-color: #38a169;
+            color: white;
+            border: 1px solid #2f855a;
+        }
+        
+        QPushButton[state="start"]:hover {
+            background-color: #48bb78;
+        }
+        
+        QPushButton[state="stop"] {
+            background-color: #e53e3e;
+            color: white;
+            border: 1px solid #c53030;
+        }
+        
+        QPushButton[state="stop"]:hover {
+            background-color: #f56565;
+        }
+        
+        QPushButton[state="banned"] {
+            background-color: #4a5568;
+            color: #a0a0a0;
+            border: 1px solid #2d3748;
+        }
+        
+        /* Row highlighting for different states */
+        QTableWidget::item[data="active"] {
+            background-color: #2f5233;
+            color: #68d391;
+        }
+        
+        QTableWidget::item[data="banned"] {
+            background-color: #4a2d2d;
+            color: #fc8181;
+        }
+        
+        QTableWidget::item[data="unhealthy"] {
+            background-color: #4a3d2d;
+            color: #f6ad55;
+        }
+        """
+    
+    def delete_all_banned_accounts(self):
+        """Delete all banned accounts with confirmation"""
+        try:
+            # Get all banned accounts
+            accounts = self.account_manager.get_accounts_with_health()
+            banned_accounts = [email for email, _, health in accounts if health == 'banned']
+            
+            if not banned_accounts:
+                QMessageBox.information(self, _('delete_banned'), _('no_banned_accounts'))
+                return
+            
+            # Show confirmation dialog
+            reply = QMessageBox.question(
+                self, 
+                _('delete_banned'),
+                _('delete_banned_confirm'),
+                QMessageBox.Yes | QMessageBox.No,
+                QMessageBox.No
+            )
+            
+            if reply == QMessageBox.Yes:
+                deleted_count = 0
+                for email in banned_accounts:
+                    if self.account_manager.delete_account(email):
+                        deleted_count += 1
+                
+                self.load_accounts(preserve_limits=True)
+                self.show_status_message(_('deleted_banned_accounts', deleted_count), 5000)
+                
+        except Exception as e:
+            self.show_status_message(f"Error deleting banned accounts: {str(e)}", 5000)
+    
+    def refresh_expired_tokens(self):
+        """Refresh tokens for all accounts with expired tokens"""
+        try:
+            accounts = self.account_manager.get_accounts_with_health()
+            expired_accounts = []
+            current_time = int(time.time() * 1000)
+            
+            for email, account_json, health_status in accounts:
+                if health_status == 'banned':
+                    continue
+                
+                try:
+                    account_data = json.loads(account_json)
+                    expiration_time = account_data['stsTokenManager']['expirationTime']
+                    if isinstance(expiration_time, str):
+                        expiration_time = int(expiration_time)
+                    
+                    # Check if token has expired or will expire in next 5 minutes
+                    if current_time >= (expiration_time - 300000):  # 5 minutes buffer
+                        expired_accounts.append((email, account_json, health_status))
+                except:
+                    continue
+            
+            if not expired_accounts:
+                QMessageBox.information(self, _('refresh_tokens'), _('no_expired_tokens'))
+                return
+            
+            # Use existing refresh_limits with filtered accounts
+            self.show_status_message(f"🔄 Refreshing {len(expired_accounts)} expired tokens...", 3000)
+            
+            # Create a temporary worker for expired accounts only
+            self.progress_dialog = QProgressDialog(
+                f"Refreshing {len(expired_accounts)} expired tokens...",
+                "Cancel", 0, 100, self
+            )
+            self.progress_dialog.setWindowModality(Qt.WindowModal)
+            self.progress_dialog.show()
+            
+            # Start worker with expired accounts
+            self.worker = TokenRefreshWorker(expired_accounts, self.proxy_enabled, 5)
+            self.worker.progress.connect(self.update_progress)
+            self.worker.finished.connect(self.refresh_finished)
+            self.worker.error.connect(self.refresh_error)
+            self.worker.start()
+            
+            # Disable buttons
+            self.refresh_tokens_button.setEnabled(False)
+            self.refresh_limits_button.setEnabled(False)
+            
+        except Exception as e:
+            self.show_status_message(f"Error refreshing expired tokens: {str(e)}", 5000)
+    
+    def show_status_message(self, message, timeout_ms=3000, color=None):
+        """Show status message with optional color and timeout"""
+        try:
+            # Show message in status bar
+            self.status_bar.showMessage(message, timeout_ms)
+            
+            # Apply color if specified
+            if color:
+                original_style = self.status_bar.styleSheet()
+                self.status_bar.setStyleSheet(f"QStatusBar {{ color: {color}; }}")
+                
+                # Restore original style after timeout
+                QTimer.singleShot(timeout_ms, lambda: self.status_bar.setStyleSheet(original_style))
+            
+            # Start or restart the status reset timer
+            if hasattr(self, 'status_reset_timer'):
+                self.status_reset_timer.start(timeout_ms)
+            
+        except Exception as e:
+            print(f"Error showing status message: {e}")
+    
+    def reset_status_message(self):
+        """Reset status message to default"""
+        try:
+            debug_mode = os.path.exists("debug.txt")
+            if debug_mode:
+                default_msg = _('default_status_debug') if hasattr(self, '_') else 'Ready (Debug Mode)'
+            else:
+                default_msg = _('default_status') if hasattr(self, '_') else 'Ready'
+            
+            self.status_bar.showMessage(default_msg)
+        except Exception as e:
+            print(f"Error resetting status message: {e}")
 
     def load_accounts(self, preserve_limits=False):
         """Load accounts to table with search functionality"""
-        # 使用新方法获取包含创建时间的完整信息
+        # 获取所有账户信息（已按next_refresh_time排序）
+        # 返回顺序: (id, email, account_data, health_status, limit_info, next_refresh_time, created_at)
         all_accounts = self.account_manager.get_accounts_with_all_info()
         
         # 获取搜索文字
@@ -812,7 +1368,7 @@ class MainWindow(QMainWindow):
         if search_text:
             accounts = []
             for account in all_accounts:
-                account_id, email, account_json, health_status, created_at, limit_info = account
+                account_id, email, account_json, health_status, limit_info, next_refresh_time, created_at = account
                 
                 # 搜索匹配条件：邮箱、ID、状态、使用量
                 search_fields = [
@@ -850,8 +1406,8 @@ class MainWindow(QMainWindow):
         self.table.setRowCount(len(accounts))
         active_account = self.account_manager.get_active_account()
 
-        # 数据顺序现在是: (id, email, account_data, health_status, created_at, limit_info)
-        for row, (account_id, email, account_json, health_status, created_at, limit_info) in enumerate(accounts):
+        # 数据顺序现在是: (id, email, account_data, health_status, limit_info, next_refresh_time, created_at)
+        for row, (account_id, email, account_json, health_status, limit_info, next_refresh_time, created_at) in enumerate(accounts):
             # ID (Column 0)
             id_item = QTableWidgetItem(str(account_id))
             id_item.setTextAlignment(Qt.AlignLeft | Qt.AlignVCenter)
@@ -866,7 +1422,7 @@ class MainWindow(QMainWindow):
             try:
                 # Banned account check - show banned status instead of token status
                 if health_status == 'banned':
-                    status = 'Banned'
+                    status = _('status_banned')
                 else:
                     account_data = json.loads(account_json)
                     expiration_time = account_data['stsTokenManager']['expirationTime']
@@ -896,23 +1452,24 @@ class MainWindow(QMainWindow):
             usage_item.setTextAlignment(Qt.AlignLeft | Qt.AlignVCenter)
             self.table.setItem(row, 3, usage_item)
             
-            # Created time (Column 4)
-            if created_at:
-                # 格式化创建时间（显示为易读格式）
+            # NextRefreshTime (Column 4) - 账号过期时间
+            if next_refresh_time:
+                # 格式化nextRefreshTime为易读格式
                 try:
-                    from datetime import datetime
-                    # 解析SQLite时间格式
-                    dt = datetime.strptime(created_at, '%Y-%m-%d %H:%M:%S')
-                    # 格式化为更紧凑的显示
-                    created_str = dt.strftime('%m-%d %H:%M')
+                    from datetime import datetime, timezone
+                    # 解析ISO格式时间
+                    dt = datetime.fromisoformat(next_refresh_time.replace('Z', '+00:00'))
+                    # 转换为本地时间并格式化为简洁显示
+                    local_dt = dt.astimezone()
+                    expires_str = local_dt.strftime('%m-%d %H:%M')
                 except:
-                    created_str = created_at[:16] if created_at else 'Unknown'
+                    expires_str = next_refresh_time[:16] if next_refresh_time else '未知'
             else:
-                created_str = 'Unknown'
+                expires_str = '未知'
             
-            created_item = QTableWidgetItem(created_str)
-            created_item.setTextAlignment(Qt.AlignLeft | Qt.AlignVCenter)
-            self.table.setItem(row, 4, created_item)
+            expires_item = QTableWidgetItem(expires_str)
+            expires_item.setTextAlignment(Qt.AlignLeft | Qt.AlignVCenter)
+            self.table.setItem(row, 4, expires_item)
             
             # Action button (Column 5) - Dark theme compatible
             activation_button = QPushButton()
@@ -924,15 +1481,15 @@ class MainWindow(QMainWindow):
             is_banned = (health_status == 'banned')  # Use direct health status
 
             if is_banned:
-                activation_button.setText('Banned')  # Show banned text
+                activation_button.setText(_('status_banned'))  # Show banned text
                 activation_button.setProperty("state", "banned")
                 activation_button.setEnabled(False)  # Disable button for banned accounts
             elif is_active:
-                activation_button.setText('Stop')
+                activation_button.setText(_('button_stop'))
                 activation_button.setProperty("state", "stop")
                 activation_button.setEnabled(True)
             else:
-                activation_button.setText('Start')
+                activation_button.setText(_('button_start'))
                 activation_button.setProperty("state", "start")
                 activation_button.setEnabled(True)
 
@@ -943,7 +1500,7 @@ class MainWindow(QMainWindow):
             # Set row CSS properties for dark theme compatibility
             if health_status == 'banned':
                 # Banned account
-                for col in range(0, 5):  # Columns 0-4 (ID to Created)
+                for col in range(0, 5):  # Columns 0-4 (ID to Expires)
                     item = self.table.item(row, col)
                     if item:
                         item.setData(Qt.UserRole, "banned")
@@ -1073,14 +1630,62 @@ class MainWindow(QMainWindow):
         except Exception as e:
             self.show_status_message(f"Deletion error: {str(e)}", 5000)
 
+    def _validate_account_json(self, json_data):
+        """Validate account JSON data structure"""
+        try:
+            account_data = json.loads(json_data)
+            
+            # Check required fields
+            required_fields = ['email', 'stsTokenManager', 'apiKey']
+            for field in required_fields:
+                if field not in account_data:
+                    return False, f"Missing required field: {field}"
+            
+            # Check stsTokenManager structure
+            token_manager = account_data['stsTokenManager']
+            required_token_fields = ['accessToken', 'refreshToken', 'expirationTime']
+            for field in required_token_fields:
+                if field not in token_manager:
+                    return False, f"Missing token field: {field}"
+            
+            # Check if email is valid format
+            email = account_data['email']
+            if '@' not in email or '.' not in email:
+                return False, "Invalid email format"
+            
+            return True, "Valid"
+            
+        except json.JSONDecodeError as e:
+            return False, f"Invalid JSON format: {e}"
+        except Exception as e:
+            return False, f"Validation error: {e}"
+    
     def add_account(self):
         """Open add account dialog"""
         dialog = AddAccountDialog(self)
         if dialog.exec_() == QDialog.Accepted:
             json_data = dialog.get_json_data()
             if json_data:
+                # Validate JSON data before adding
+                is_valid, validation_message = self._validate_account_json(json_data)
+                if not is_valid:
+                    self.status_bar.showMessage(f"{_('error')}: {validation_message}", 5000)
+                    QMessageBox.warning(self, "Invalid Account Data", 
+                                       f"The account data is invalid:\n\n{validation_message}")
+                    return
+                
                 success, message = self.account_manager.add_account(json_data)
                 if success:
+                    # Get email from the added account for initial data fetch
+                    try:
+                        account_data = json.loads(json_data)
+                        email = account_data.get('email')
+                        if email:
+                            # Fetch initial usage and expiry data for the new account
+                            self._fetch_new_account_data(email, account_data)
+                    except Exception as e:
+                        print(f"Error fetching initial data for new account: {e}")
+                    
                     self.load_accounts()
                     self.status_bar.showMessage(_('account_added_success'), 3000)
                 else:
@@ -1165,6 +1770,14 @@ class MainWindow(QMainWindow):
             
             # Check if account was saved to database 
             if result.get('saved_to_database', False):
+                # Fetch initial data for the newly created account
+                if result.get('account_data'):
+                    try:
+                        account_data = json.loads(result['account_data'])
+                        self._fetch_new_account_data(email, account_data)
+                    except Exception as e:
+                        print(f"Error fetching initial data for created account: {e}")
+                        
                 self.status_bar.showMessage(f"✅ Account created and saved: {email}", 5000)
                 # Reload accounts table to show new account immediately
                 self.load_accounts()
@@ -1319,6 +1932,10 @@ class MainWindow(QMainWindow):
         self.refresh_limits_button.setEnabled(True)
         self.add_account_button.setEnabled(True)
         self.create_account_button.setEnabled(True)
+        if hasattr(self, 'refresh_tokens_button'):
+            self.refresh_tokens_button.setEnabled(True)
+        if hasattr(self, 'delete_banned_button'):
+            self.delete_banned_button.setEnabled(True)
 
         # Show detailed status message
         if total_time > 0:
@@ -1335,6 +1952,10 @@ class MainWindow(QMainWindow):
         self.refresh_limits_button.setEnabled(True)
         self.add_account_button.setEnabled(True)
         self.create_account_button.setEnabled(True)
+        if hasattr(self, 'refresh_tokens_button'):
+            self.refresh_tokens_button.setEnabled(True)
+        if hasattr(self, 'delete_banned_button'):
+            self.delete_banned_button.setEnabled(True)
         self.status_bar.showMessage(f"{_('error')}: {error_message}", 5000)
 
     def start_proxy_and_activate_account(self, email):
@@ -2269,8 +2890,42 @@ class MainWindow(QMainWindow):
             # Continue silently on error (normal if file doesn't exist)
             pass
 
+    def refresh_active_account_usage(self):
+        """Only monitor active account usage for auto-switching - optimized for frequent calls"""
+        if not self.proxy_enabled:
+            return
+            
+        active_email = self.account_manager.get_active_account()
+        if not active_email:
+            return
+            
+        try:
+            # Get account data without refreshing tokens
+            accounts_with_health = self.account_manager.get_accounts_with_health()
+            for acc_email, acc_json, acc_health in accounts_with_health:
+                if acc_email == active_email:
+                    account_data = json.loads(acc_json)
+                    
+                    # Check if token is close to expiring (within 5 minutes)
+                    expiration_time = account_data['stsTokenManager']['expirationTime']
+                    if isinstance(expiration_time, str):
+                        expiration_time = int(expiration_time)
+                    current_time = int(time.time() * 1000)
+                    
+                    # If token expires within 5 minutes, refresh it
+                    if current_time >= (expiration_time - 300000):  # 5 minutes buffer
+                        print(f"🔄 Token expiring soon for {active_email}, refreshing...")
+                        self.refresh_active_account()
+                        return
+                    
+                    # Only get usage info for monitoring
+                    self._update_active_account_usage_only(active_email, account_data, acc_health)
+                    break
+        except Exception as e:
+            print(f"Active account usage monitoring error: {e}")
+    
     def refresh_active_account(self):
-        """Refresh token and limit of active account - every 30 seconds"""
+        """Full refresh of active account token and limit info using background thread"""
         try:
             # Stop timer if proxy is not active
             if not self.proxy_enabled:
@@ -2384,7 +3039,7 @@ class MainWindow(QMainWindow):
                 self.show_status_message(f"✅ Switched to {next_email}", 4000)
             else:
                 print("⚠️ No healthy accounts available for switching")
-                self.show_status_message("⚠️ All accounts exhausted or unhealthy!", 8000)
+                self.show_status_message(_('no_healthy_accounts'), 8000)
                 
         except Exception as e:
             print(f"Auto-switch error: {e}")
@@ -2767,14 +3422,28 @@ class MainWindow(QMainWindow):
         self.add_account_button.setText(_('add_account'))
         self.create_account_button.setText(_('auto_add_account'))
         self.refresh_limits_button.setText(_('refresh_limits'))
+        
+        # Batch operation buttons (check if they exist)
+        if hasattr(self, 'delete_banned_button'):
+            self.delete_banned_button.setText(_('delete_banned'))
+            self.delete_banned_button.setToolTip(_('delete_banned_confirm'))
+        
+        if hasattr(self, 'refresh_tokens_button'):
+            self.refresh_tokens_button.setText(_('refresh_tokens'))
+            self.refresh_tokens_button.setToolTip(_('refresh_tokens_confirm'))
+            
         self.help_button.setText(_('help'))
         self.help_button.setToolTip(_('help_tooltip'))
+        
+        # Refresh sidebar texts
+        if hasattr(self, 'sidebar'):
+            self.sidebar.refresh_ui_texts()
 
         # Search placeholder
         self.search_input.setPlaceholderText(_('search_placeholder'))
         
         # Table headers
-        self.table.setHorizontalHeaderLabels(['ID', _('email'), _('status'), _('limit'), _('created'), 'Action'])
+        self.table.setHorizontalHeaderLabels(['ID', _('email'), _('status'), _('limit'), _('expires'), _('action')])
 
         # Status bar
         debug_mode = os.path.exists("debug.txt")

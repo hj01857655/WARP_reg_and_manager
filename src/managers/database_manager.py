@@ -85,6 +85,19 @@ class DatabaseManager:
         except sqlite3.OperationalError as e:
             print(f"limit_info column migration warning: {e}")
         
+        # Add next_refresh_time column to existing table (if doesn't exist)
+        try:
+            cursor.execute("PRAGMA table_info(accounts)")
+            columns = [col[1] for col in cursor.fetchall()]
+            
+            if 'next_refresh_time' not in columns:
+                # Column doesn't exist, create it
+                cursor.execute('ALTER TABLE accounts ADD COLUMN next_refresh_time TEXT')
+                print("✅ Added next_refresh_time column to accounts table")
+                
+        except sqlite3.OperationalError as e:
+            print(f"next_refresh_time column migration warning: {e}")
+        
         # Create proxy settings table
         cursor.execute('''
             CREATE TABLE IF NOT EXISTS proxy_settings (
@@ -185,19 +198,29 @@ class DatabaseManager:
                 
             return cursor.fetchall()
     
-    def get_accounts_with_all_info(self) -> List[Tuple[str, str, str, str, str, str]]:
-        """Get all accounts with complete info following DB structure order: (id, email, account_data, health_status, created_at, limit_info)"""
+    def get_accounts_with_all_info(self) -> List[Tuple[str, str, str, str, str, str, str]]:
+        """Get all accounts with complete info matching table column order: (id, email, account_data, health_status, limit_info, next_refresh_time, created_at)
+        Table columns: ID, Email, Status, Usage, Expires, Action
+        """
         with sqlite3.connect(self.db_path) as conn:
             cursor = conn.cursor()
             
-            # Select fields matching DB structure order (excluding last_updated)
-            # DB order: id, email, account_data, health_status, created_at, last_updated, limit_info
-            # We select: id, email, account_data, health_status, created_at, limit_info
+            # Select fields matching table column order
+            # Table order: ID, Email, Status, Usage, Expires, Action
+            # DB fields: id, email, account_data(Status), health_status, limit_info(Usage), next_refresh_time(Expires), created_at
             try:
-                cursor.execute('SELECT id, email, account_data, health_status, created_at, limit_info FROM accounts ORDER BY created_at ASC')
+                # Order by next_refresh_time ASC (earliest expiration first), then by created_at ASC
+                cursor.execute('''
+                    SELECT id, email, account_data, health_status, limit_info, next_refresh_time, created_at 
+                    FROM accounts 
+                    ORDER BY 
+                        CASE WHEN next_refresh_time IS NULL THEN 1 ELSE 0 END,
+                        next_refresh_time ASC,
+                        created_at ASC
+                ''')
             except sqlite3.OperationalError:
-                # Fallback without created_at if column doesn't exist
-                cursor.execute('SELECT id, email, account_data, health_status, NULL, limit_info FROM accounts ORDER BY email')
+                # Fallback if columns don't exist
+                cursor.execute('SELECT id, email, account_data, health_status, limit_info, NULL, created_at FROM accounts ORDER BY created_at ASC')
                 
             return cursor.fetchall()
 
@@ -267,6 +290,21 @@ class DatabaseManager:
             return True
         except Exception as e:
             print(f"Limit info update error: {e}")
+            return False
+    
+    def update_account_next_refresh_time(self, email: str, next_refresh_time: str) -> bool:
+        """Update account next refresh time (when flow resets)"""
+        try:
+            with sqlite3.connect(self.db_path) as conn:
+                cursor = conn.cursor()
+                cursor.execute('''
+                    UPDATE accounts SET next_refresh_time = ?, last_updated = CURRENT_TIMESTAMP
+                    WHERE email = ?
+                ''', (next_refresh_time, email))
+                conn.commit()
+            return True
+        except Exception as e:
+            print(f"Next refresh time update error: {e}")
             return False
 
     def delete_account(self, email: str) -> bool:

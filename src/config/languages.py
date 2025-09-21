@@ -228,6 +228,41 @@ You need to install the certificate manually. This procedure is performed only o
                 'active_account_clear_error': 'Active account clear error: {}',
                 'account_delete_error': 'Account delete error: {}',
                 'limit_info_update_error': 'Limit info update error: {}',
+                
+                # Batch operation buttons
+                'delete_banned': '🗑️ Delete Banned',
+                'refresh_tokens': '🔄 Refresh Tokens',
+                
+                # Action column
+                'action': 'Action',
+                'button_start': 'Start',
+                'button_stop': 'Stop',
+                
+                # Error messages
+                'no_healthy_accounts': '⚠️ No healthy accounts available for switching',
+                'account_switching_failed': 'Account switching failed',
+                
+                # Confirmation dialogs
+                'delete_banned_confirm': 'Are you sure you want to delete all banned accounts?\n\nThis action cannot be undone!',
+                'refresh_tokens_confirm': 'Are you sure you want to refresh all expired tokens?',
+                
+                # Operation results
+                'deleted_banned_accounts': 'Deleted {} banned accounts',
+                'refreshed_tokens': 'Refreshed {} tokens',
+                'no_banned_accounts': 'No banned accounts found',
+                'no_expired_tokens': 'No expired tokens found',
+                
+                # Column headers
+                'expires': 'Expires',
+                
+                # Sidebar translations
+                'sidebar_subtitle': 'Account Management',
+                'sidebar_navigation': 'NAVIGATION',
+                'sidebar_dashboard': 'Dashboard',
+                'sidebar_accounts': 'Accounts',
+                'sidebar_about': 'About',
+                'sidebar_status': '🟢 System Ready',
+                'sidebar_version': 'Version 2.0.0',
             },
             'zh': {
                 # Contact Us dialog (Chinese)
@@ -259,6 +294,47 @@ You need to install the certificate manually. This procedure is performed only o
                 'default_status': '启用代理并点击账号的开始按钮来开始使用。',
                 'default_status_debug': '启用代理并点击账号的开始按钮来开始使用。（调试模式已激活）',
                 'search_placeholder': '🔍 按邮箱、ID、状态（活跃/封禁/过期）搜索...',
+                
+                # 批量操作按钮
+                'delete_banned': '🗑️ 删除封禁账号',
+                'refresh_tokens': '🔄 刷新令牌',
+                
+                # 操作按钮
+                'action': '操作',
+                'button_start': '开始',
+                'button_stop': '停止',
+                
+                # 状态翻译
+                'status_active': '活跃',
+                'status_banned': '封禁',
+                'status_token_expired': '令牌过期',
+                'status_na': '无',
+                
+                # 错误信息
+                'no_healthy_accounts': '⚠️ 没有可用的健康账户可以切换',
+                'account_switching_failed': '账户切换失败',
+                
+                # 确认对话框
+                'delete_banned_confirm': '确定要删除所有封禁的账号吗？\n\n此操作无法撤销！',
+                'refresh_tokens_confirm': '确定要刷新所有过期的令牌吗？',
+                
+                # 操作结果
+                'deleted_banned_accounts': '已删除 {} 个封禁账号',
+                'refreshed_tokens': '已刷新 {} 个令牌',
+                'no_banned_accounts': '没有找到封禁的账号',
+                'no_expired_tokens': '没有找到过期的令牌',
+                
+                # 列标题
+                'expires': '账号过期',
+                
+                # 侧边栏翻译
+                'sidebar_subtitle': '账号管理',
+                'sidebar_navigation': '导航',
+                'sidebar_dashboard': '仪表板',
+                'sidebar_accounts': '账号管理',
+                'sidebar_about': '关于',
+                'sidebar_status': '🟢 系统就绪',
+                'sidebar_version': '版本 2.0.0',
             }
         }
 

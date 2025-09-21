@@ -77,6 +77,22 @@ def log_to_file(message):
 # Hide SSL warnings
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
+# Browser headers for mimicking real user requests
+STANDARD_BROWSER_HEADERS = {
+    "accept": "*/*",
+    "accept-language": "zh-CN,zh;q=0.9,en;q=0.8,en-GB;q=0.7,en-US;q=0.6",
+    "cache-control": "no-cache",
+    "pragma": "no-cache",
+    "priority": "u=1, i",
+    "sec-ch-ua": '"Chromium";v="140", "Not=A?Brand";v="24", "Microsoft Edge";v="140"',
+    "sec-ch-ua-mobile": "?0",
+    "sec-ch-ua-platform": '"Windows"',
+    "sec-fetch-dest": "empty",
+    "sec-fetch-mode": "cors",
+    "sec-fetch-site": "same-origin",
+    "referer": "https://app.warp.dev/"
+}
+
 # SSL verification bypass - complete SSL verification disable
 import ssl
 try:
@@ -477,23 +493,29 @@ def request(flow: http.HTTPFlow) -> None:
         handler.refresh_user_settings()
 
     # Check account change trigger (on every request)
-    if handler.check_account_change_trigger():
+    trigger_detected = handler.check_account_change_trigger()
+    if trigger_detected:
         print("🔄 Trigger detected and token updated!")
-
-    # Show active account information
-    print(f"📧 Current active account: {handler.active_email}")
 
     # Check token every 30 seconds
     current_time = time.time()
-    if current_time - handler.last_token_check > 30:  # 30 seconds
-        print("⏰ Time for token check, updating...")
+    token_check_needed = current_time - handler.last_token_check > 30  # 30 seconds
+    
+    # Remember old email for comparison throughout the function
+    old_email = handler.active_email
+    
+    if token_check_needed or not handler.active_email:
+        if token_check_needed and handler.active_email:
+            print("⏰ Periodic token check...")
+        elif not handler.active_email:
+            print("❓ No active account found, checking token...")
+        
         handler.update_active_token()
         handler.last_token_check = current_time
-
-    # Check active account
-    if not handler.active_email:
-        print("❓ No active account found, checking token...")
-        handler.update_active_token()
+        
+        # Only show account info if it changed or was initially empty
+        if old_email != handler.active_email:
+            print(f"📧 Active account: {old_email} → {handler.active_email}")
 
     # Modify Authorization header
     if handler.active_token:
@@ -501,34 +523,42 @@ def request(flow: http.HTTPFlow) -> None:
         new_auth = f"Bearer {handler.active_token}"
         flow.request.headers["Authorization"] = new_auth
 
-        print(f"🔑 Authorization header updated: {handler.active_email}")
-
-        # Check if tokens are actually different
+        # Only show detailed output if there's an issue or on first request after account change
         if old_auth == new_auth:
-            print("   ⚠️  WARNING: Old and new tokens are IDENTICAL!")
-        else:
-            print("   ✅ Token successfully changed")
-
-        # Also show token ending
-        if len(handler.active_token) > 100:
-            print(f"   Token : {handler.active_token}")
+            print(f"   ⚠️  WARNING: Token unchanged for {handler.active_email}!")
+        elif trigger_detected or (old_email != handler.active_email and old_email is not None):
+            print(f"🔑 Authorization updated: {handler.active_email}")
 
     else:
         print("❌ ACTIVE TOKEN NOT FOUND - HEADER NOT MODIFIED!")
-        print(f"   Active email: {handler.active_email}")
-        print(f"   Token status: {handler.active_token is not None}")
+        if handler.active_email:
+            print(f"   Email: {handler.active_email} (token missing)")
 
     # For all app.warp.dev requests check and randomize x-warp-experiment-id header
     if "app.warp.dev" in flow.request.pretty_host:
+        # Remove User-Agent (onboarded users don't have this)
+        if "User-Agent" in flow.request.headers:
+            del flow.request.headers["User-Agent"]
+        
+        # Inject standard browser headers to mimic real user
+        for header_name, header_value in STANDARD_BROWSER_HEADERS.items():
+            flow.request.headers[header_name] = header_value
+        
+        # Only log header injection on account changes or first few requests
+        if trigger_detected or (old_email != handler.active_email and old_email is not None):
+            print(f"🌐 Browser headers injected for: {flow.request.path}")
+        
         # Always generate new experiment ID and add/modify header
         new_experiment_id = generate_experiment_id()
         old_experiment_id = flow.request.headers.get("x-warp-experiment-id", "None")
         flow.request.headers["x-warp-experiment-id"] = new_experiment_id
         
-        print(f"🧪 Experiment ID changed ({flow.request.path}):")
-        if old_experiment_id != '' or old_experiment_id != None:
-            print(f"   Old: {old_experiment_id}")
-        print(f"   New: {new_experiment_id}")
+        # Only show experiment ID details on important paths or account changes
+        if ("/ai/multi-agent" in flow.request.path or 
+            "/graphql/v2" in flow.request.path or
+            trigger_detected or 
+            (old_email != handler.active_email and old_email is not None)):
+            print(f"🧪 Experiment ID: {new_experiment_id} ({flow.request.path})")
 
 def responseheaders(flow: http.HTTPFlow) -> None:
     """Executed when response headers are received - controls streaming"""

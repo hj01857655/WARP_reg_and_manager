@@ -242,6 +242,12 @@ class TokenRefreshWorker(QThread):
                 used = limit_info.get('requestsUsedSinceLastRefresh', 0)
                 total = limit_info.get('requestLimit', 0)
                 limit_text = f"{used}/{total}"
+                
+                # Update nextRefreshTime if available
+                next_refresh_time = limit_info.get('nextRefreshTime')
+                if next_refresh_time:
+                    self.account_manager.update_account_next_refresh_time(email, next_refresh_time)
+                
                 # Success - mark as healthy and save limit info
                 self.account_manager.update_account_health(email, _('status_healthy'))
                 self.account_manager.update_account_limit_info(email, limit_text)
