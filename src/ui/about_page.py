@@ -521,9 +521,9 @@ This project is not affiliated with Cloudflare Inc.
             QPushButton:hover {{
                 background-color: {color}dd;
             }}
-            QPushButton:pressed {
+            QPushButton:pressed {{
                 background-color: {color}aa;
-            }
+            }}
         """
     
     def refresh_ui_texts(self):
