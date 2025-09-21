@@ -26,18 +26,18 @@ class InfoCard(QFrame):
         layout.setSpacing(10)
         
         # Title
-        title_label = QLabel(title)
-        title_label.setFont(QFont("Segoe UI", 12, QFont.Bold))
-        title_label.setStyleSheet("color: #63b3ed;")
-        layout.addWidget(title_label)
+        self.title_label = QLabel(title)
+        self.title_label.setFont(QFont("Segoe UI", 12, QFont.Bold))
+        self.title_label.setStyleSheet("color: #63b3ed;")
+        layout.addWidget(self.title_label)
         
         # Content
-        content_label = QLabel(content)
-        content_label.setFont(QFont("Segoe UI", 10))
-        content_label.setStyleSheet("color: #e2e8f0; line-height: 1.4;")
-        content_label.setWordWrap(True)
-        content_label.setTextInteractionFlags(Qt.TextSelectableByMouse)
-        layout.addWidget(content_label)
+        self.content_label = QLabel(content)
+        self.content_label.setFont(QFont("Segoe UI", 10))
+        self.content_label.setStyleSheet("color: #e2e8f0; line-height: 1.4;")
+        self.content_label.setWordWrap(True)
+        self.content_label.setTextInteractionFlags(Qt.TextSelectableByMouse)
+        layout.addWidget(self.content_label)
         
         self.setLayout(layout)
         
@@ -133,26 +133,26 @@ class AboutPage(QWidget):
         layout.addWidget(logo_label)
         
         # App title
-        title_label = QLabel("Warp Account Manager")
-        title_label.setFont(QFont("Segoe UI", 28, QFont.Bold))
-        title_label.setStyleSheet("color: #63b3ed;")
-        title_label.setAlignment(Qt.AlignCenter)
-        layout.addWidget(title_label)
+        self.title_label = QLabel(_('about_app_title'))
+        self.title_label.setFont(QFont("Segoe UI", 28, QFont.Bold))
+        self.title_label.setStyleSheet("color: #63b3ed;")
+        self.title_label.setAlignment(Qt.AlignCenter)
+        layout.addWidget(self.title_label)
         
         # Version
-        version_label = QLabel("Version 2.0.0")
-        version_label.setFont(QFont("Segoe UI", 14))
-        version_label.setStyleSheet("color: #a0aec0;")
-        version_label.setAlignment(Qt.AlignCenter)
-        layout.addWidget(version_label)
+        self.version_label = QLabel(_('about_version'))
+        self.version_label.setFont(QFont("Segoe UI", 14))
+        self.version_label.setStyleSheet("color: #a0aec0;")
+        self.version_label.setAlignment(Qt.AlignCenter)
+        layout.addWidget(self.version_label)
         
         # Description
-        desc_label = QLabel("A powerful tool for managing Warp.dev accounts with advanced features\nand modern user interface")
-        desc_label.setFont(QFont("Segoe UI", 12))
-        desc_label.setStyleSheet("color: #e2e8f0; line-height: 1.5;")
-        desc_label.setAlignment(Qt.AlignCenter)
-        desc_label.setWordWrap(True)
-        layout.addWidget(desc_label)
+        self.desc_label = QLabel(_('about_description'))
+        self.desc_label.setFont(QFont("Segoe UI", 12))
+        self.desc_label.setStyleSheet("color: #e2e8f0; line-height: 1.5;")
+        self.desc_label.setAlignment(Qt.AlignCenter)
+        self.desc_label.setWordWrap(True)
+        layout.addWidget(self.desc_label)
         
         section.setLayout(layout)
         return section
@@ -165,33 +165,24 @@ class AboutPage(QWidget):
         layout.setSpacing(15)
         
         # Section title
-        title_label = QLabel("📋 Application Information")
-        title_label.setFont(QFont("Segoe UI", 18, QFont.Bold))
-        title_label.setStyleSheet("color: #e2e8f0; margin-bottom: 10px;")
-        layout.addWidget(title_label)
+        self.app_info_title = QLabel(_('about_app_info_title'))
+        self.app_info_title.setFont(QFont("Segoe UI", 18, QFont.Bold))
+        self.app_info_title.setStyleSheet("color: #e2e8f0; margin-bottom: 10px;")
+        layout.addWidget(self.app_info_title)
         
         # Version and changelog card
-        version_changelog = self.get_version_changelog()
-        version_card = InfoCard(
-            "📌 Version & Changelog",
-            version_changelog
+        self.version_card = InfoCard(
+            _('about_version_changelog_title'),
+            _('about_version_changelog_content')
         )
-        layout.addWidget(version_card)
+        layout.addWidget(self.version_card)
         
         # Info cards
-        features_card = InfoCard(
-            "✨ Key Features",
-            "• Multi-account management with health monitoring\n"
-            "• Automatic token refresh and account switching\n"
-            "• Modern responsive user interface with animations\n"
-            "• Real-time system status monitoring\n"
-            "• Batch operations for account management\n"
-            "• Multi-language support (English/中文)\n"
-            "• Advanced mitmproxy integration\n"
-            "• Registry monitoring and auto-switching\n"
-            "• Secure local data encryption"
+        self.features_card = InfoCard(
+            _('about_features_title'),
+            _('about_features_content')
         )
-        layout.addWidget(features_card)
+        layout.addWidget(self.features_card)
         
         section.setLayout(layout)
         return section
@@ -221,20 +212,17 @@ class AboutPage(QWidget):
         layout.setSpacing(15)
         
         # Section title
-        title_label = QLabel("🛠️ Technology Stack")
-        title_label.setFont(QFont("Segoe UI", 18, QFont.Bold))
-        title_label.setStyleSheet("color: #e2e8f0; margin-bottom: 10px;")
-        layout.addWidget(title_label)
+        self.tech_title = QLabel(_('about_tech_title'))
+        self.tech_title.setFont(QFont("Segoe UI", 18, QFont.Bold))
+        self.tech_title.setStyleSheet("color: #e2e8f0; margin-bottom: 10px;")
+        layout.addWidget(self.tech_title)
         
         # Core technologies
-        core_tech_card = InfoCard(
-            "🖥️ Core Technologies",
-            f"• Python {sys.version.split()[0]} - Main development language\n"
-            "• PyQt5 5.15+ - Cross-platform GUI framework\n"
-            "• SQLite 3.x - Embedded database system\n"
-            "• asyncio - Asynchronous programming support"
+        self.core_tech_card = InfoCard(
+            _('about_core_tech_title'),
+            _('about_core_tech_content', sys.version.split()[0])
         )
-        layout.addWidget(core_tech_card)
+        layout.addWidget(self.core_tech_card)
         
         # Network & Security
         network_card = InfoCard(
@@ -396,25 +384,25 @@ class AboutPage(QWidget):
         buttons_layout.setSpacing(15)
         
         # GitHub repository
-        github_btn = QPushButton("📂 GitHub Repository")
-        github_btn.setFixedHeight(45)
-        github_btn.clicked.connect(lambda: QDesktopServices.openUrl(QUrl("https://github.com/hj01857655/WARP_reg_and_manager")))
-        github_btn.setStyleSheet(self.get_button_style("#4a5568"))
-        buttons_layout.addWidget(github_btn)
+        self.github_btn = QPushButton(_('about_github_btn'))
+        self.github_btn.setFixedHeight(45)
+        self.github_btn.clicked.connect(lambda: QDesktopServices.openUrl(QUrl("https://github.com/hj01857655/WARP_reg_and_manager")))
+        self.github_btn.setStyleSheet(self.get_button_style("#4a5568"))
+        buttons_layout.addWidget(self.github_btn)
         
         # Telegram channel
-        telegram_btn = QPushButton("📱 Telegram Channel")
-        telegram_btn.setFixedHeight(45)
-        telegram_btn.clicked.connect(lambda: QDesktopServices.openUrl(QUrl("https://t.me/warp5215")))
-        telegram_btn.setStyleSheet(self.get_button_style("#0088cc"))
-        buttons_layout.addWidget(telegram_btn)
+        self.telegram_btn = QPushButton(_('about_telegram_channel_btn'))
+        self.telegram_btn.setFixedHeight(45)
+        self.telegram_btn.clicked.connect(lambda: QDesktopServices.openUrl(QUrl("https://t.me/warp5215")))
+        self.telegram_btn.setStyleSheet(self.get_button_style("#0088cc"))
+        buttons_layout.addWidget(self.telegram_btn)
         
         # Telegram chat
-        chat_btn = QPushButton("💬 Telegram Chat")
-        chat_btn.setFixedHeight(45)
-        chat_btn.clicked.connect(lambda: QDesktopServices.openUrl(QUrl("https://t.me/warp1215")))
-        chat_btn.setStyleSheet(self.get_button_style("#0088cc"))
-        buttons_layout.addWidget(chat_btn)
+        self.chat_btn = QPushButton(_('about_telegram_chat_btn'))
+        self.chat_btn.setFixedHeight(45)
+        self.chat_btn.clicked.connect(lambda: QDesktopServices.openUrl(QUrl("https://t.me/warp1215")))
+        self.chat_btn.setStyleSheet(self.get_button_style("#0088cc"))
+        buttons_layout.addWidget(self.chat_btn)
         
         buttons_layout.addStretch()
         layout.addLayout(buttons_layout)
@@ -533,7 +521,33 @@ This project is not affiliated with Cloudflare Inc.
             QPushButton:hover {{
                 background-color: {color}dd;
             }}
-            QPushButton:pressed {{
+            QPushButton:pressed {
                 background-color: {color}aa;
-            }}
+            }
         """
+    
+    def refresh_ui_texts(self):
+        """Refresh all UI texts when language changes"""
+        # Update header section
+        self.title_label.setText(_('about_app_title'))
+        self.version_label.setText(_('about_version'))
+        self.desc_label.setText(_('about_description'))
+        
+        # Update section titles
+        self.app_info_title.setText(_('about_app_info_title'))
+        self.tech_title.setText(_('about_tech_title'))
+        
+        # Update info cards
+        self.version_card.title_label.setText(_('about_version_changelog_title'))
+        self.version_card.content_label.setText(_('about_version_changelog_content'))
+        
+        self.features_card.title_label.setText(_('about_features_title'))
+        self.features_card.content_label.setText(_('about_features_content'))
+        
+        self.core_tech_card.title_label.setText(_('about_core_tech_title'))
+        self.core_tech_card.content_label.setText(_('about_core_tech_content', sys.version.split()[0]))
+        
+        # Update buttons
+        self.github_btn.setText(_('about_github_btn'))
+        self.telegram_btn.setText(_('about_telegram_channel_btn'))
+        self.chat_btn.setText(_('about_telegram_chat_btn'))

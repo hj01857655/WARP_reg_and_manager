@@ -263,6 +263,22 @@ You need to install the certificate manually. This procedure is performed only o
                 'sidebar_about': 'About',
                 'sidebar_status': '🟢 System Ready',
                 'sidebar_version': 'Version 2.0.0',
+                
+                # About page translations
+                'about_app_title': 'Warp Account Manager',
+                'about_version': 'Version 2.0.0',
+                'about_description': 'A powerful tool for managing Warp.dev accounts with advanced features\nand modern user interface',
+                'about_app_info_title': '📋 Application Information',
+                'about_version_changelog_title': '📌 Version & Changelog',
+                'about_version_changelog_content': '🔖 Current Version: v2.0.0\n📅 Release Date: 2025-01-19\n\n📋 Latest Changes:\n• Enhanced modern UI with glassmorphism effects\n• Improved sidebar navigation with animations\n• Added comprehensive error handling system\n• Implemented registry monitoring for auto-switching\n• Added multi-language support framework\n• Enhanced security with data encryption\n• Optimized performance and memory usage\n• Added automated testing framework\n\n🔗 Full changelog: https://github.com/hj01857655/WARP_reg_and_manager/releases',
+                'about_features_title': '✨ Key Features',
+                'about_features_content': '• Multi-account management with health monitoring\n• Automatic token refresh and account switching\n• Modern responsive user interface with animations\n• Real-time system status monitoring\n• Batch operations for account management\n• Multi-language support (English/中文)\n• Advanced mitmproxy integration\n• Registry monitoring and auto-switching\n• Secure local data encryption',
+                'about_tech_title': '🛠️ Technology Stack',
+                'about_core_tech_title': '🖥️ Core Technologies',
+                'about_core_tech_content': '• Python {} - Main development language\n• PyQt5 5.15+ - Cross-platform GUI framework\n• SQLite 3.x - Embedded database system\n• asyncio - Asynchronous programming support',
+                'about_github_btn': '📂 GitHub Repository',
+                'about_telegram_channel_btn': '📱 Telegram Channel',
+                'about_telegram_chat_btn': '💬 Telegram Chat',
             },
             'zh': {
                 # Contact Us dialog (Chinese)
@@ -335,6 +351,22 @@ You need to install the certificate manually. This procedure is performed only o
                 'sidebar_about': '关于',
                 'sidebar_status': '🟢 系统就绪',
                 'sidebar_version': '版本 2.0.0',
+                
+                # 关于页面翻译
+                'about_app_title': 'Warp 账号管理器',
+                'about_version': '版本 2.0.0',
+                'about_description': '一个用于管理 Warp.dev 账户的强大工具\n具有先进功能和现代用户界面',
+                'about_app_info_title': '📋 应用程序信息',
+                'about_version_changelog_title': '📌 版本及更新日志',
+                'about_version_changelog_content': '🔖 当前版本: v2.0.0\n📅 发布日期: 2025-01-19\n\n📋 最新更改:\n• 增强的现代 UI 和毛玻璃效果\n• 改进的侧边栏导航和动画\n• 添加综合错误处理系统\n• 实现注册表监控和自动切换\n• 添加多语言支持框架\n• 增强数据加密安全性\n• 优化性能和内存使用\n• 添加自动化测试框架\n\n🔗 完整更新日志: https://github.com/hj01857655/WARP_reg_and_manager/releases',
+                'about_features_title': '✨ 主要功能',
+                'about_features_content': '• 带有健康监控的多账户管理\n• 自动令牌刷新和账户切换\n• 现代响应式用户界面和动画\n• 实时系统状态监控\n• 账户管理批量操作\n• 多语言支持（英文/中文）\n• 高级 mitmproxy 集成\n• 注册表监控和自动切换\n• 安全的本地数据加密',
+                'about_tech_title': '🛠️ 技术栈',
+                'about_core_tech_title': '🖥️ 核心技术',
+                'about_core_tech_content': '• Python {} - 主要开发语言\n• PyQt5 5.15+ - 跨平台 GUI 框架\n• SQLite 3.x - 嵌入式数据库系统\n• asyncio - 异步编程支持',
+                'about_github_btn': '📂 GitHub 仓库',
+                'about_telegram_channel_btn': '📱 Telegram 频道',
+                'about_telegram_chat_btn': '💬 Telegram 聊天',
             }
         }
 

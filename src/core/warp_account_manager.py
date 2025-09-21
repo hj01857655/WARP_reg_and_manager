@@ -3438,6 +3438,10 @@ class MainWindow(QMainWindow):
         # Refresh sidebar texts
         if hasattr(self, 'sidebar'):
             self.sidebar.refresh_ui_texts()
+        
+        # Refresh about page texts
+        if hasattr(self, 'about_page'):
+            self.about_page.refresh_ui_texts()
 
         # Search placeholder
         self.search_input.setPlaceholderText(_('search_placeholder'))
