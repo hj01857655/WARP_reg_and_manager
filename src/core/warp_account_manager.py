@@ -2924,6 +2924,76 @@ class MainWindow(QMainWindow):
         except Exception as e:
             print(f"Active account usage monitoring error: {e}")
     
+    def _update_active_account_usage_only(self, email, account_data, health_status):
+        """Update usage info for active account monitoring - with smart next_refresh_time handling"""
+        try:
+            # Get limit information via API
+            limit_info = self._get_account_limit_info(account_data)
+            if limit_info and isinstance(limit_info, dict):
+                used = limit_info.get('requestsUsedSinceLastRefresh', 0)
+                total = limit_info.get('requestLimit', 0)
+                limit_text = f"{used}/{total}"
+                
+                # Always update usage info in database
+                self.account_manager.update_account_limit_info(email, limit_text)
+                
+                # Smart handling of next_refresh_time: only update if not exists in DB
+                next_refresh_time = limit_info.get('nextRefreshTime')
+                if next_refresh_time:
+                    # Check if account already has next_refresh_time in database
+                    accounts_with_full_info = self.account_manager.get_accounts_with_all_info()
+                    account_has_expiry = False
+                    
+                    for account_info in accounts_with_full_info:
+                        if account_info[1] == email:  # email is at index 1
+                            existing_refresh_time = account_info[5]  # next_refresh_time is at index 5
+                            if existing_refresh_time:  # If already has a next_refresh_time
+                                account_has_expiry = True
+                            break
+                    
+                    # Only update next_refresh_time if account doesn't have one (new account or missing data)
+                    if not account_has_expiry:
+                        self.account_manager.update_account_next_refresh_time(email, next_refresh_time)
+                        print(f"✅ Updated expiry time for {email}: {next_refresh_time[:19]}")
+                
+                # Check if account has reached limit and auto-switch
+                remaining = total - used if total > 0 else float('inf')
+                
+                # 根据不同情况判断是否需要切换
+                should_switch = False
+                switch_reason = ""
+                
+                # 检查是否为被封禁账号
+                is_banned = (health_status == 'banned')
+                
+                if remaining == 0 and total > 0:
+                    should_switch = True
+                    if is_banned:
+                        switch_reason = "banned_and_exhausted"
+                        print(f"🔴 Account {email} is banned and has 0 remaining quota ({used}/{total}) - will auto-switch")
+                    else:
+                        switch_reason = "exhausted_only"
+                        print(f"⚪ Account {email} has 0 remaining quota ({used}/{total}) - will auto-switch")
+                elif is_banned:
+                    should_switch = True
+                    switch_reason = "banned_only"
+                    print(f"🚫 Account {email} is banned ({used}/{total}) - will auto-switch")
+                elif remaining > 0 and remaining <= 10:
+                    # 余量少于10个时提醒但不切换
+                    print(f"⚠️ Account {email} has only {remaining} requests left ({used}/{total})")
+                else:
+                    # 正常情况不输出日志，减少噪音
+                    pass
+                
+                if should_switch:
+                    print(f"📢 Auto-switching from: {email} (reason: {switch_reason})")
+                    self._auto_switch_account(f"{email}|{switch_reason}")
+            else:
+                print(f"❌ Failed to get usage info: {email}")
+                
+        except Exception as e:
+            print(f"Usage monitoring error: {e}")
+    
     def refresh_active_account(self):
         """Full refresh of active account token and limit info using background thread"""
         try:
