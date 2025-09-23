@@ -763,12 +763,43 @@ class AccountCardPage(QWidget):
     def format_account_expiry(self, account):
         """格式化账户过期时间"""
         expiry = account.get('expiry', '')
-        if expiry and expiry != 'N/A':
-            expiry_str = str(expiry)
-            if '-' in expiry_str or '/' in expiry_str:
-                return expiry_str.split(' ')[0] if ' ' in expiry_str else expiry_str
+        
+        # 处理空值或特殊值
+        if not expiry or expiry == 'N/A' or expiry == '永久' or expiry == 'Permanent':
+            return '永久'
+        
+        expiry_str = str(expiry).strip()
+        
+        # 尝试解析并格式化显示
+        try:
+            from datetime import datetime
+            
+            # 标准日期时间格式列表
+            datetime_formats = [
+                '%Y-%m-%d %H:%M:%S',
+                '%Y/%m/%d %H:%M:%S',
+                '%Y-%m-%d %H:%M',
+                '%Y/%m/%d %H:%M',
+                '%Y-%m-%d',
+                '%Y/%m/%d',
+            ]
+            
+            for fmt in datetime_formats:
+                try:
+                    expiry_date = datetime.strptime(expiry_str, fmt)
+                    # 统一显示为 YYYY-MM-DD HH:MM 格式
+                    if '%H' in fmt:  # 如果原始数据包含时间
+                        return expiry_date.strftime('%Y-%m-%d %H:%M')
+                    else:
+                        return expiry_date.strftime('%Y-%m-%d')
+                except ValueError:
+                    continue
+            
+            # 如果无法解析，直接返回原始字符串
             return expiry_str
-        return '永久'
+            
+        except Exception:
+            return expiry_str
     
     def start_account(self, account):
         """启动账户 - 切换到此账户"""
@@ -978,53 +1009,44 @@ class AccountCardPage(QWidget):
         """获取过期时间的排序键"""
         expiry = account.get('expiry', '')
         
-        # 处理永久账户（放在最后）
-        if not expiry or expiry == 'N/A' or expiry == '永久':
+        # 处理空值或永久账户（放在最后）
+        if not expiry or expiry == 'N/A' or expiry == '永久' or expiry == 'Permanent':
             return float('inf')
         
-        # 处理已过期（放在最前）
+        # 处理已过期状态（放在最前）
         if account.get('status') == 'expired':
             return -1
         
-        # 尝试解析日期字符串
-        expiry_str = str(expiry)
+        expiry_str = str(expiry).strip()
         
-        # 处理中文格式的剩余时间
-        if '剩余' in expiry_str:
-            try:
-                if '分钟' in expiry_str:
-                    minutes = int(expiry_str.split('剩余')[1].split('分钟')[0])
-                    return minutes / (24 * 60)  # 转换为天数
-                elif '小时' in expiry_str:
-                    hours = int(expiry_str.split('剩余')[1].split('小时')[0])
-                    return hours / 24  # 转换为天数
-                elif '天' in expiry_str:
-                    days = int(expiry_str.split('剩余')[1].split('天')[0])
-                    return days
-            except:
-                pass
-        
-        # 处理日期格式 (YYYY-MM-DD 或 YYYY/MM/DD)
-        if '-' in expiry_str or '/' in expiry_str:
-            try:
-                from datetime import datetime
-                # 只取日期部分
-                date_str = expiry_str.split(' ')[0] if ' ' in expiry_str else expiry_str
-                
-                # 尝试不同的日期格式
-                for fmt in ['%Y-%m-%d', '%Y/%m/%d', '%d-%m-%Y', '%d/%m/%Y']:
-                    try:
-                        expiry_date = datetime.strptime(date_str, fmt)
-                        # 计算距离今天的天数
-                        days_remaining = (expiry_date - datetime.now()).days
-                        return days_remaining if days_remaining >= 0 else -1
-                    except:
-                        continue
-            except:
-                pass
-        
-        # 默认放在中间
-        return 9999
+        # 尝试解析标准日期时间格式
+        try:
+            from datetime import datetime
+            
+            # 标准日期时间格式列表
+            datetime_formats = [
+                '%Y-%m-%d %H:%M:%S',     # 2025-12-31 23:59:59
+                '%Y/%m/%d %H:%M:%S',     # 2025/12/31 23:59:59
+                '%Y-%m-%d %H:%M',        # 2025-12-31 23:59
+                '%Y/%m/%d %H:%M',        # 2025/12/31 23:59
+                '%Y-%m-%d',              # 2025-12-31
+                '%Y/%m/%d',              # 2025/12/31
+            ]
+            
+            for fmt in datetime_formats:
+                try:
+                    expiry_date = datetime.strptime(expiry_str, fmt)
+                    # 返回时间戳用于排序（越小越早过期）
+                    return expiry_date.timestamp()
+                except ValueError:
+                    continue
+            
+            # 如果都解析失败，返回默认值
+            return 9999999999
+            
+        except Exception as e:
+            print(f"解析过期时间失败: {expiry_str}, 错误: {e}")
+            return 9999999999
     
     def import_accounts(self):
         """导入账户"""
