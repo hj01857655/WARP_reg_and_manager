@@ -314,15 +314,8 @@ class WarpRegistryManager:
                             limit_data['next_refresh_time_formatted'] = next_refresh[:19]
                             limit_data['days_until_refresh'] = -1
                     
-                    # 格式化刷新周期
-                    refresh_duration = limit_data.get("request_limit_refresh_duration", "")
-                    duration_map = {
-                        "EveryTwoWeeks": "每两周",
-                        "Monthly": "每月",
-                        "Weekly": "每周",
-                        "Daily": "每天"
-                    }
-                    limit_data['refresh_duration_formatted'] = duration_map.get(refresh_duration, refresh_duration)
+                    # 刷新周期直接使用原始值
+                    limit_data['refresh_duration_formatted'] = limit_data.get("request_limit_refresh_duration", "EveryTwoWeeks")
                     
                     # 计算使用率
                     limit = limit_data.get("limit", 1)
@@ -343,7 +336,7 @@ class WarpRegistryManager:
             "days_until_refresh": -1,
             "is_unlimited": False,
             "request_limit_refresh_duration": "EveryTwoWeeks",
-            "refresh_duration_formatted": "每两周",
+            "refresh_duration_formatted": "EveryTwoWeeks",
             "usage_percentage": 0.0
         }
     
@@ -392,6 +385,136 @@ class WarpRegistryManager:
             print(f"更新AI请求使用量失败: {e}")
         
         return False
+    
+    def reset_experiment_id(self) -> bool:
+        """重置 ExperimentId（生成新的机器码）"""
+        return self.update_experiment_id()
+    
+    def get_all_registry_values(self) -> Dict[str, Any]:
+        """获取所有 Warp 相关的注册表值"""
+        values = {}
+        try:
+            key = self._open_warp_registry_key(winreg.KEY_READ)
+            if key:
+                index = 0
+                while True:
+                    try:
+                        name, value, reg_type = winreg.EnumValue(key, index)
+                        values[name] = value
+                        index += 1
+                    except WindowsError:
+                        break
+                winreg.CloseKey(key)
+        except Exception as e:
+            print(f"获取所有注册表值失败: {e}")
+        return values
+    
+    def backup_registry_settings(self, file_path: str = None) -> bool:
+        """备份所有 Warp 注册表设置到文件"""
+        try:
+            import json
+            from datetime import datetime
+            
+            if not file_path:
+                file_path = f"warp_registry_backup_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
+            
+            all_values = self.get_all_registry_values()
+            
+            backup_data = {
+                "backup_time": datetime.now().isoformat(),
+                "registry_path": self.warp_registry_path,
+                "values": all_values
+            }
+            
+            with open(file_path, 'w', encoding='utf-8') as f:
+                json.dump(backup_data, f, ensure_ascii=False, indent=2)
+            
+            print(f"✅ 注册表设置已备份到: {file_path}")
+            return True
+            
+        except Exception as e:
+            print(f"备份注册表设置失败: {e}")
+            return False
+    
+    def restore_registry_settings(self, file_path: str) -> bool:
+        """从备份文件恢复注册表设置"""
+        try:
+            import json
+            
+            with open(file_path, 'r', encoding='utf-8') as f:
+                backup_data = json.load(f)
+            
+            values = backup_data.get('values', {})
+            restored_count = 0
+            
+            for name, value in values.items():
+                # 跳过某些不应恢复的值
+                if name in ['AIRequestLimitInfo', 'ChangelogVersions']:
+                    continue
+                    
+                # 判断数据类型
+                if isinstance(value, bool) or value in ['true', 'false']:
+                    reg_type = winreg.REG_SZ
+                    value = str(value).lower()
+                elif isinstance(value, int):
+                    reg_type = winreg.REG_DWORD
+                else:
+                    reg_type = winreg.REG_SZ
+                    value = str(value)
+                
+                if self.set_registry_value(name, value, reg_type, silent=True):
+                    restored_count += 1
+            
+            print(f"✅ 已恢复 {restored_count} 个注册表值")
+            return True
+            
+        except Exception as e:
+            print(f"恢复注册表设置失败: {e}")
+            return False
+    
+    def is_trial_expired(self) -> bool:
+        """检查试用是否已过期"""
+        limit_info = self.get_ai_request_limit_info()
+        days_left = limit_info.get('days_until_refresh', 0)
+        return days_left < 0
+    
+    def get_usage_status(self) -> str:
+        """获取使用状态描述"""
+        limit_info = self.get_ai_request_limit_info()
+        usage_percent = limit_info.get('usage_percentage', 0)
+        
+        if usage_percent >= 90:
+            return "⚠️ 即将达到限制"
+        elif usage_percent >= 70:
+            return "📊 使用量较高"
+        elif usage_percent >= 50:
+            return "📈 使用量中等"
+        else:
+            return "✅ 使用量正常"
+    
+    def export_statistics(self) -> Dict[str, Any]:
+        """导出使用统计信息"""
+        limit_info = self.get_ai_request_limit_info()
+        
+        return {
+            "subscription_type": "Trial Pro" if limit_info.get('request_limit_refresh_duration') == 'EveryTwoWeeks' else "Pro",
+            "usage": {
+                "used": limit_info.get('num_requests_used_since_refresh', 0),
+                "limit": limit_info.get('limit', 2500),
+                "percentage": limit_info.get('usage_percentage', 0),
+                "remaining": limit_info.get('limit', 2500) - limit_info.get('num_requests_used_since_refresh', 0)
+            },
+            "expiry": {
+                "date": limit_info.get('next_refresh_time_formatted', '未知'),
+                "days_remaining": limit_info.get('days_until_refresh', -1),
+                "is_expired": self.is_trial_expired()
+            },
+            "software": {
+                "version": self.get_latest_version(),
+                "machine_id": self.get_registry_value("ExperimentId") or "未知"
+            },
+            "status": self.get_usage_status()
+        }
 
 
 # 单例实例

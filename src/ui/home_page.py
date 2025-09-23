@@ -721,8 +721,8 @@ class HomePage(QWidget):
         """)
         details_section.addWidget(self.expiry_label)
         
-        # 刷新周期（直接使用格式化后的数据）
-        refresh_text = "刷新周期: " + limit_data.get('refresh_duration_formatted', '每两周')
+        # 刷新周期（直接显示原始值）
+        refresh_text = "刷新周期: " + limit_data.get('refresh_duration_formatted', 'EveryTwoWeeks')
         
         self.refresh_label = QLabel(refresh_text)
         self.refresh_label.setFont(QFont("Segoe UI", 11))
