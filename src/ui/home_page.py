@@ -694,22 +694,21 @@ class HomePage(QWidget):
         """)
         details_section.addWidget(self.percentage_label)
         
-        # 账户过期时间（直接使用格式化后的数据）
+        # 账户过期时间（直接显示格式化后的时间）
         expiry_time = limit_data.get('next_refresh_time_formatted', '未知')
-        days_left = limit_data.get('days_until_refresh', -1)
-        
-        expiry_text = "账户过期: "
-        if expiry_time != '未知':
-            if days_left >= 0:
-                expiry_text += f"{expiry_time} (剩余{days_left}天)"
-            else:
-                expiry_text += f"{expiry_time} (已过期)"
-        else:
-            expiry_text += "未知"
+        expiry_text = f"账户过期: {expiry_time}"
         
         self.expiry_label = QLabel(expiry_text)
         self.expiry_label.setFont(QFont("Segoe UI", 11, QFont.Medium))
-        expiry_color = theme_manager.get_color('accent_orange') if days_left < 7 else theme_manager.get_color('accent_green')
+        
+        # 根据使用率设置颜色
+        usage_percent = limit_data.get('usage_percentage', 0)
+        if usage_percent >= 80:
+            expiry_color = theme_manager.get_color('accent_red')
+        elif usage_percent >= 50:
+            expiry_color = theme_manager.get_color('accent_orange')
+        else:
+            expiry_color = theme_manager.get_color('accent_green')
         self.expiry_label.setStyleSheet(f"""
             QLabel {{
                 color: {expiry_color};
@@ -722,7 +721,7 @@ class HomePage(QWidget):
         details_section.addWidget(self.expiry_label)
         
         # 刷新周期（直接显示原始值）
-        refresh_text = "刷新周期: " + limit_data.get('refresh_duration_formatted', 'EveryTwoWeeks')
+        refresh_text = "刷新周期: " + limit_data.get('request_limit_refresh_duration', 'EveryTwoWeeks')
         
         self.refresh_label = QLabel(refresh_text)
         self.refresh_label.setFont(QFont("Segoe UI", 11))

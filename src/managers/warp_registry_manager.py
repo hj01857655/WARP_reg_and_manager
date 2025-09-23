@@ -304,18 +304,11 @@ class WarpRegistryManager:
                     if next_refresh:
                         try:
                             expiry_date = datetime.fromisoformat(next_refresh.replace('Z', '+00:00'))
-                            limit_data['next_refresh_time_formatted'] = expiry_date.strftime("%Y-%m-%d %H:%M")
-                            
-                            # 计算剩余天数
-                            now = datetime.now(timezone.utc)
-                            days_left = (expiry_date - now).days
-                            limit_data['days_until_refresh'] = days_left
+                            limit_data['next_refresh_time_formatted'] = expiry_date.strftime("%Y-%m-%d %H:%M:%S")
                         except:
-                            limit_data['next_refresh_time_formatted'] = next_refresh[:19]
-                            limit_data['days_until_refresh'] = -1
-                    
-                    # 刷新周期直接使用原始值
-                    limit_data['refresh_duration_formatted'] = limit_data.get("request_limit_refresh_duration", "EveryTwoWeeks")
+                            limit_data['next_refresh_time_formatted'] = next_refresh[:19] if next_refresh else "未知"
+                    else:
+                        limit_data['next_refresh_time_formatted'] = "未知"
                     
                     # 计算使用率
                     limit = limit_data.get("limit", 1)
@@ -333,10 +326,8 @@ class WarpRegistryManager:
             "num_requests_used_since_refresh": 0,
             "next_refresh_time": "",
             "next_refresh_time_formatted": "未知",
-            "days_until_refresh": -1,
             "is_unlimited": False,
             "request_limit_refresh_duration": "EveryTwoWeeks",
-            "refresh_duration_formatted": "EveryTwoWeeks",
             "usage_percentage": 0.0
         }
     
@@ -373,8 +364,7 @@ class WarpRegistryManager:
                 limit_info['num_requests_used_since_refresh'] = new_usage
                 
                 # 移除格式化字段，只保留原始数据
-                for key in ['next_refresh_time_formatted', 'days_until_refresh', 
-                           'refresh_duration_formatted', 'usage_percentage']:
+                for key in ['next_refresh_time_formatted', 'usage_percentage']:
                     limit_info.pop(key, None)
                 
                 # 保存回注册表
@@ -475,8 +465,16 @@ class WarpRegistryManager:
     def is_trial_expired(self) -> bool:
         """检查试用是否已过期"""
         limit_info = self.get_ai_request_limit_info()
-        days_left = limit_info.get('days_until_refresh', 0)
-        return days_left < 0
+        next_refresh = limit_info.get("next_refresh_time", "")
+        if next_refresh:
+            try:
+                from datetime import datetime, timezone
+                expiry_date = datetime.fromisoformat(next_refresh.replace('Z', '+00:00'))
+                now = datetime.now(timezone.utc)
+                return expiry_date < now
+            except:
+                return False
+        return False
     
     def get_usage_status(self) -> str:
         """获取使用状态描述"""
@@ -506,7 +504,6 @@ class WarpRegistryManager:
             },
             "expiry": {
                 "date": limit_info.get('next_refresh_time_formatted', '未知'),
-                "days_remaining": limit_info.get('days_until_refresh', -1),
                 "is_expired": self.is_trial_expired()
             },
             "software": {
