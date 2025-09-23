@@ -11,7 +11,9 @@ import winreg
 import random
 import time
 import threading
-from typing import Optional, Dict, Any
+import json
+from datetime import datetime, timezone
+from typing import Optional, Dict, Any, List
 
 
 class WarpRegistryManager:
@@ -264,15 +266,132 @@ class WarpRegistryManager:
             settings['ReverseProTrialModalDismissed'] = self.get_registry_value("ReverseProTrialModalDismissed")
             settings['TelemetryEnabled'] = self.get_registry_value("TelemetryEnabled")
             settings['ExperimentId'] = self.get_registry_value("ExperimentId")
+            settings['AIRequestLimitInfo'] = self.get_ai_request_limit_info()
+            settings['ChangelogVersions'] = self.get_changelog_versions()
             
             print("📋 当前Warp注册表设置:")
             for key, value in settings.items():
-                print(f"   {key}: {value}")
+                if key == 'AIRequestLimitInfo' and isinstance(value, dict):
+                    print(f"   {key}:")
+                    print(f"      - 使用量: {value.get('num_requests_used_since_refresh')}/{value.get('limit')}")
+                    print(f"      - 账户过期: {value.get('next_refresh_time_formatted')}")
+                    print(f"      - 刷新周期: {value.get('refresh_duration_formatted')}")
+                elif key == 'ChangelogVersions':
+                    print(f"   {key}: {value[0] if value else '未知'}")
+                else:
+                    print(f"   {key}: {value}")
                 
         except Exception as e:
             print(f"获取注册表设置失败: {e}")
             
         return settings
+    
+    def get_ai_request_limit_info(self) -> Dict[str, Any]:
+        """获取并解析AI请求限制信息"""
+        try:
+            ai_limit_info = self.get_registry_value("AIRequestLimitInfo")
+            if ai_limit_info:
+                # 解析JSON数据
+                if isinstance(ai_limit_info, str):
+                    limit_data = json.loads(ai_limit_info)
+                else:
+                    limit_data = ai_limit_info
+                
+                # 添加格式化后的字段
+                if limit_data:
+                    # 格式化账户过期时间
+                    next_refresh = limit_data.get("next_refresh_time", "")
+                    if next_refresh:
+                        try:
+                            expiry_date = datetime.fromisoformat(next_refresh.replace('Z', '+00:00'))
+                            limit_data['next_refresh_time_formatted'] = expiry_date.strftime("%Y-%m-%d %H:%M")
+                            
+                            # 计算剩余天数
+                            now = datetime.now(timezone.utc)
+                            days_left = (expiry_date - now).days
+                            limit_data['days_until_refresh'] = days_left
+                        except:
+                            limit_data['next_refresh_time_formatted'] = next_refresh[:19]
+                            limit_data['days_until_refresh'] = -1
+                    
+                    # 格式化刷新周期
+                    refresh_duration = limit_data.get("request_limit_refresh_duration", "")
+                    duration_map = {
+                        "EveryTwoWeeks": "每两周",
+                        "Monthly": "每月",
+                        "Weekly": "每周",
+                        "Daily": "每天"
+                    }
+                    limit_data['refresh_duration_formatted'] = duration_map.get(refresh_duration, refresh_duration)
+                    
+                    # 计算使用率
+                    limit = limit_data.get("limit", 1)
+                    used = limit_data.get("num_requests_used_since_refresh", 0)
+                    limit_data['usage_percentage'] = round((used / limit * 100) if limit > 0 else 0, 1)
+                    
+                return limit_data
+            
+        except Exception as e:
+            print(f"获取AI请求限制信息失败: {e}")
+        
+        # 返回默认值
+        return {
+            "limit": 2500,
+            "num_requests_used_since_refresh": 0,
+            "next_refresh_time": "",
+            "next_refresh_time_formatted": "未知",
+            "days_until_refresh": -1,
+            "is_unlimited": False,
+            "request_limit_refresh_duration": "EveryTwoWeeks",
+            "refresh_duration_formatted": "每两周",
+            "usage_percentage": 0.0
+        }
+    
+    def get_changelog_versions(self) -> List[str]:
+        """获取并解析软件版本信息"""
+        try:
+            changelog = self.get_registry_value("ChangelogVersions")
+            if changelog:
+                # 解析JSON数据
+                if isinstance(changelog, str):
+                    versions_data = json.loads(changelog)
+                else:
+                    versions_data = changelog
+                
+                # 返回版本列表
+                if isinstance(versions_data, dict):
+                    return list(versions_data.keys())
+                
+        except Exception as e:
+            print(f"获取版本信息失败: {e}")
+        
+        return []
+    
+    def get_latest_version(self) -> str:
+        """获取最新软件版本"""
+        versions = self.get_changelog_versions()
+        return versions[0] if versions else "未知"
+    
+    def update_ai_request_usage(self, new_usage: int) -> bool:
+        """更新AI请求使用量（仅用于测试或调试）"""
+        try:
+            limit_info = self.get_ai_request_limit_info()
+            if limit_info:
+                limit_info['num_requests_used_since_refresh'] = new_usage
+                
+                # 移除格式化字段，只保留原始数据
+                for key in ['next_refresh_time_formatted', 'days_until_refresh', 
+                           'refresh_duration_formatted', 'usage_percentage']:
+                    limit_info.pop(key, None)
+                
+                # 保存回注册表
+                json_str = json.dumps(limit_info)
+                return self.set_registry_value("AIRequestLimitInfo", json_str, winreg.REG_SZ, silent=True)
+        
+        except Exception as e:
+            print(f"更新AI请求使用量失败: {e}")
+        
+        return False
 
 
 # 单例实例

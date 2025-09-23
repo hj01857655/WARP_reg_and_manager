@@ -14,6 +14,8 @@ from PyQt5.QtGui import QFont, QPalette
 from src.config.languages import _
 from src.utils.warp_user_data import WarpUserDataManager
 from src.ui.theme_manager import theme_manager
+from src.managers.warp_registry_manager import warp_registry_manager
+import json
 
 
 class StatCard(QFrame):
@@ -114,12 +116,13 @@ class HomePage(QWidget):
         super().__init__(parent)
         self.account_manager = account_manager
         self.warp_data_reader = WarpUserDataManager()
+        self.registry_manager = warp_registry_manager  # 添加注册表管理器
         self.init_ui()
         
         # Setup timer for periodic updates
         self.update_timer = QTimer()
         self.update_timer.timeout.connect(self.update_stats)
-        self.update_timer.start(600000)  # Update every 10 minutes (600,000 ms)
+        self.update_timer.start(30000)  # Update every 30 seconds for real-time data
         
         # Initial stats update
         self.update_stats()
@@ -602,46 +605,48 @@ class HomePage(QWidget):
         return card
     
     def create_subscription_card(self):
-        """Create right card - Subscription information"""
+        """创建右卡片 - 订阅信息（从注册表获取真实数据）"""
         card = QFrame()
         card.setFrameStyle(QFrame.NoFrame)
-        # 移除高度限制，让卡片根据内容自适应高度
-        card.setMinimumWidth(280)  # 设置最小宽度避免过窄
-        # 移除最大宽度限制，让卡片自适应填充空间
+        card.setMinimumWidth(280)
         
         # Use theme manager for card styling
         card.setStyleSheet(theme_manager.get_card_style('green'))
         
         layout = QVBoxLayout(card)
-        layout.setContentsMargins(12, 10, 12, 10)  # 进一步减少内边距
-        layout.setSpacing(8)  # 进一步减少间距
+        layout.setContentsMargins(12, 10, 12, 10)
+        layout.setSpacing(8)
         
-        # Card header - 简化并减小占用空间
+        # Card header
         header_layout = QHBoxLayout()
-        header_layout.setContentsMargins(0, 0, 0, 5)  # 减少底部边距
+        header_layout.setContentsMargins(0, 0, 0, 5)
         
         subscription_icon = QLabel("⭐")
-        subscription_icon.setFont(QFont("Segoe UI Emoji", 14))  # 减小图标大小
+        subscription_icon.setFont(QFont("Segoe UI Emoji", 14))
         subscription_icon.setStyleSheet("color: #10b981; background: transparent;")
         header_layout.addWidget(subscription_icon)
         
         subscription_title = QLabel("订阅信息")
-        subscription_title.setFont(QFont("Segoe UI", 12, QFont.Bold))  # 减小标题字号
+        subscription_title.setFont(QFont("Segoe UI", 12, QFont.Bold))
         subscription_title.setStyleSheet(f"color: {theme_manager.get_color('text_primary')}; background: transparent;")
         header_layout.addWidget(subscription_title)
         
         header_layout.addStretch()
-        
         layout.addLayout(header_layout)
         
         # Subscription details
         details_section = QVBoxLayout()
-        details_section.setSpacing(8)  # 减少订阅信息间距
+        details_section.setSpacing(8)
         
-        # Plan type - 添加圆角背景
-        plan_label = QLabel("套餐类型: Trial Pro")
-        plan_label.setFont(QFont("Segoe UI", 11, QFont.Medium))
-        plan_label.setStyleSheet(f"""
+        # 从注册表获取AIRequestLimitInfo（使用优化后的方法）
+        limit_data = warp_registry_manager.get_ai_request_limit_info()
+        
+        # 套餐类型 (根据request_limit_refresh_duration判断)
+        refresh_duration = limit_data.get("request_limit_refresh_duration", "EveryTwoWeeks")
+        plan_type = "Trial Pro" if refresh_duration == "EveryTwoWeeks" else "Pro"
+        self.plan_label = QLabel(f"套餐类型: {plan_type}")
+        self.plan_label.setFont(QFont("Segoe UI", 11, QFont.Medium))
+        self.plan_label.setStyleSheet(f"""
             QLabel {{
                 color: {theme_manager.get_color('accent_blue')};
                 background: rgba(255, 255, 255, 0.1);
@@ -650,12 +655,14 @@ class HomePage(QWidget):
                 padding: 8px 12px;
             }}
         """)
-        details_section.addWidget(plan_label)
+        details_section.addWidget(self.plan_label)
         
-        # Usage info - 添加圆角背景
-        usage_label = QLabel("使用量: 0 / 2500 次")
-        usage_label.setFont(QFont("Segoe UI", 11))
-        usage_label.setStyleSheet(f"""
+        # 使用量
+        limit = limit_data.get("limit", 2500)
+        used = limit_data.get("num_requests_used_since_refresh", 0)
+        self.usage_label = QLabel(f"使用量: {used} / {limit} 次")
+        self.usage_label.setFont(QFont("Segoe UI", 11))
+        self.usage_label.setStyleSheet(f"""
             QLabel {{
                 color: {theme_manager.get_color('text_secondary')};
                 background: rgba(255, 255, 255, 0.1);
@@ -664,40 +671,62 @@ class HomePage(QWidget):
                 padding: 8px 12px;
             }}
         """)
-        details_section.addWidget(usage_label)
+        details_section.addWidget(self.usage_label)
         
-        # Progress bar placeholder (textual representation) - 添加圆角背景
-        progress_label = QLabel("剩余额度: 2500 次")
-        progress_label.setFont(QFont("Segoe UI", 11, QFont.Medium))
-        progress_label.setStyleSheet(f"""
+        # 使用率（直接从注册表管理器获取）
+        usage_percent = limit_data.get('usage_percentage', 0)
+        percent_color = theme_manager.get_color('accent_green')
+        if usage_percent >= 80:
+            percent_color = theme_manager.get_color('accent_red')
+        elif usage_percent >= 50:
+            percent_color = theme_manager.get_color('accent_orange')
+        
+        self.percentage_label = QLabel(f"使用率: {usage_percent}%")
+        self.percentage_label.setFont(QFont("Segoe UI", 11, QFont.Bold))
+        self.percentage_label.setStyleSheet(f"""
             QLabel {{
-                color: {theme_manager.get_color('accent_green')};
+                color: {percent_color};
                 background: rgba(255, 255, 255, 0.1);
                 border: 1px solid rgba(255, 255, 255, 0.2);
                 border-radius: 8px;
                 padding: 8px 12px;
             }}
         """)
-        details_section.addWidget(progress_label)
+        details_section.addWidget(self.percentage_label)
         
-        # Usage percentage - 减小百分比显示大小 - 添加圆角背景
-        percentage_label = QLabel("使用率: 0%")
-        percentage_label.setFont(QFont("Segoe UI", 11, QFont.Bold))
-        percentage_label.setStyleSheet(f"""
+        # 账户过期时间（直接使用格式化后的数据）
+        expiry_time = limit_data.get('next_refresh_time_formatted', '未知')
+        days_left = limit_data.get('days_until_refresh', -1)
+        
+        expiry_text = "账户过期: "
+        if expiry_time != '未知':
+            if days_left >= 0:
+                expiry_text += f"{expiry_time} (剩余{days_left}天)"
+            else:
+                expiry_text += f"{expiry_time} (已过期)"
+        else:
+            expiry_text += "未知"
+        
+        self.expiry_label = QLabel(expiry_text)
+        self.expiry_label.setFont(QFont("Segoe UI", 11, QFont.Medium))
+        expiry_color = theme_manager.get_color('accent_orange') if days_left < 7 else theme_manager.get_color('accent_green')
+        self.expiry_label.setStyleSheet(f"""
             QLabel {{
-                color: {theme_manager.get_color('accent_green')};
+                color: {expiry_color};
                 background: rgba(255, 255, 255, 0.1);
                 border: 1px solid rgba(255, 255, 255, 0.2);
                 border-radius: 8px;
                 padding: 8px 12px;
             }}
         """)
-        details_section.addWidget(percentage_label)
+        details_section.addWidget(self.expiry_label)
         
-        # Refresh period - 添加圆角背景
-        refresh_label = QLabel("刷新周期: 每两周")
-        refresh_label.setFont(QFont("Segoe UI", 11))
-        refresh_label.setStyleSheet(f"""
+        # 刷新周期（直接使用格式化后的数据）
+        refresh_text = "刷新周期: " + limit_data.get('refresh_duration_formatted', '每两周')
+        
+        self.refresh_label = QLabel(refresh_text)
+        self.refresh_label.setFont(QFont("Segoe UI", 11))
+        self.refresh_label.setStyleSheet(f"""
             QLabel {{
                 color: {theme_manager.get_color('accent_blue')};
                 background: rgba(255, 255, 255, 0.1);
@@ -706,7 +735,7 @@ class HomePage(QWidget):
                 padding: 8px 12px;
             }}
         """)
-        details_section.addWidget(refresh_label)
+        details_section.addWidget(self.refresh_label)
         
         layout.addLayout(details_section)
         
@@ -715,49 +744,45 @@ class HomePage(QWidget):
         return card
     
     def create_software_info_card(self):
-        """Create software information card for the second row"""
+        """创建软件信息卡片（从注册表获取真实数据）"""
         card = QFrame()
         card.setFrameStyle(QFrame.NoFrame)
-        # 移除高度限制，让卡片根据内容自适应高度
-        card.setMinimumWidth(280)  # 设置最小宽度
-        # 移除最大宽度限制，让卡片自适应填充空间
+        card.setMinimumWidth(280)
         
         # Use theme manager for card styling
         card.setStyleSheet(theme_manager.get_card_style('orange'))
         
         layout = QVBoxLayout(card)
-        layout.setContentsMargins(12, 10, 12, 10)  # 进一步减少内边距
+        layout.setContentsMargins(12, 10, 12, 10)
         layout.setSpacing(8)
         
-        # Card header - 简化并减小占用空间
+        # Card header
         header_layout = QHBoxLayout()
-        header_layout.setContentsMargins(0, 0, 0, 5)  # 减少底部边距
+        header_layout.setContentsMargins(0, 0, 0, 5)
         
         software_icon = QLabel("🔒")
-        software_icon.setFont(QFont("Segoe UI Emoji", 14))  # 减小图标大小
+        software_icon.setFont(QFont("Segoe UI Emoji", 14))
         software_icon.setStyleSheet("color: #f59e0b; background: transparent;")
         header_layout.addWidget(software_icon)
         
         software_title = QLabel("软件信息")
-        software_title.setFont(QFont("Segoe UI", 12, QFont.Bold))  # 减小标题字号
+        software_title.setFont(QFont("Segoe UI", 12, QFont.Bold))
         software_title.setStyleSheet(f"color: {theme_manager.get_color('text_primary')}; background: transparent;")
         header_layout.addWidget(software_title)
         
         header_layout.addStretch()
-        
         layout.addLayout(header_layout)
         
-        # Software details in grid layout
-        details_layout = QHBoxLayout()
-        details_layout.setSpacing(30)
+        # Software details
+        details_layout = QVBoxLayout()
+        details_layout.setSpacing(6)
         
-        # Left column
-        left_column = QVBoxLayout()
-        left_column.setSpacing(6)
+        # 获取机器码 (ExperimentId)
+        experiment_id = warp_registry_manager.get_registry_value("ExperimentId") or "未知"
         
-        machine_label = QLabel("机器码: c3cb83da-3b2c-4507-baed-803d842fbe16")
-        machine_label.setFont(QFont("Segoe UI", 11))
-        machine_label.setStyleSheet(f"""
+        self.machine_label = QLabel(f"机器码: {experiment_id}")
+        self.machine_label.setFont(QFont("Segoe UI", 11))
+        self.machine_label.setStyleSheet(f"""
             QLabel {{
                 color: {theme_manager.get_color('accent_blue')};
                 background: rgba(255, 255, 255, 0.1);
@@ -766,12 +791,16 @@ class HomePage(QWidget):
                 padding: 8px 12px;
             }}
         """)
-        machine_label.setWordWrap(True)  # 启用自动换行
-        left_column.addWidget(machine_label)
+        self.machine_label.setWordWrap(True)
+        self.machine_label.setTextInteractionFlags(Qt.TextSelectableByMouse)  # 允许选择文本
+        details_layout.addWidget(self.machine_label)
         
-        version_label = QLabel("软件版本: v0.2025.09.17.08.11.stable_02")
-        version_label.setFont(QFont("Segoe UI", 11))
-        version_label.setStyleSheet(f"""
+        # 获取软件版本（使用优化后的方法）
+        version = warp_registry_manager.get_latest_version()
+        
+        self.version_label = QLabel(f"软件版本: {version}")
+        self.version_label.setFont(QFont("Segoe UI", 11))
+        self.version_label.setStyleSheet(f"""
             QLabel {{
                 color: {theme_manager.get_color('accent_blue')};
                 background: rgba(255, 255, 255, 0.1);
@@ -780,10 +809,8 @@ class HomePage(QWidget):
                 padding: 8px 12px;
             }}
         """)
-        version_label.setWordWrap(True)  # 启用自动换行
-        left_column.addWidget(version_label)
-        
-        details_layout.addLayout(left_column)
+        self.version_label.setWordWrap(True)
+        details_layout.addWidget(self.version_label)
         
         layout.addLayout(details_layout)
         
