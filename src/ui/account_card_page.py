@@ -384,6 +384,8 @@ class AccountCardPage(QWidget):
         self.cards = []  # 保留cards属性以支持卡片视图（如果需要）
         self.search_text = ""  # 搜索文本
         self.selected_accounts = set()  # 选中的账户ID
+        self.sort_column = 4  # 默认按账户过期列（第4列）排序
+        self.sort_order = Qt.AscendingOrder  # 默认升序
         self.init_ui()
         self.load_accounts()
     
@@ -614,6 +616,13 @@ class AccountCardPage(QWidget):
         self.table_widget.setSelectionBehavior(QTableWidget.SelectRows)
         self.table_widget.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
         self.table_widget.setHorizontalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+        
+        # 启用表头点击排序
+        self.table_widget.setSortingEnabled(False)  # 禁用自动排序，我们手动控制
+        header.sectionClicked.connect(self.on_header_clicked)
+        
+        # 设置默认排序指示器（账户过期列，升序）
+        header.setSortIndicator(4, Qt.AscendingOrder)
     
     def update_select_all_header(self):
         """在表头第一列设置全选复选框"""
@@ -938,8 +947,84 @@ class AccountCardPage(QWidget):
     
     def sort_accounts(self, accounts):
         """对账户进行排序"""
-        # 默认按邮箱排序
-        return sorted(accounts, key=lambda x: x.get('email', ''))
+        if not hasattr(self, 'sort_column'):
+            self.sort_column = 4  # 默认按账户过期列排序
+            self.sort_order = Qt.AscendingOrder
+        
+        # 定义各列的排序函数
+        def get_sort_key(account):
+            if self.sort_column == 1:  # 邮箱列
+                return account.get('email', '')
+            elif self.sort_column == 2:  # 状态列
+                status_order = {'active': 0, 'inactive': 1, 'banned': 2, 'expired': 3}
+                return status_order.get(account.get('status', 'unknown'), 4)
+            elif self.sort_column == 3:  # 限制列（使用率）
+                try:
+                    usage = float(account.get('usage', '0').replace('GB', '').strip())
+                    limit = float(account.get('limit', '2500').replace('GB', '').strip())
+                    return (usage / limit) * 100 if limit > 0 else 0
+                except:
+                    return 0
+            elif self.sort_column == 4:  # 账户过期列
+                return self.get_expiry_sort_key(account)
+            else:
+                return 0
+        
+        # 根据排序顺序排序
+        reverse = (self.sort_order == Qt.DescendingOrder)
+        return sorted(accounts, key=get_sort_key, reverse=reverse)
+    
+    def get_expiry_sort_key(self, account):
+        """获取过期时间的排序键"""
+        expiry = account.get('expiry', '')
+        
+        # 处理永久账户（放在最后）
+        if not expiry or expiry == 'N/A' or expiry == '永久':
+            return float('inf')
+        
+        # 处理已过期（放在最前）
+        if account.get('status') == 'expired':
+            return -1
+        
+        # 尝试解析日期字符串
+        expiry_str = str(expiry)
+        
+        # 处理中文格式的剩余时间
+        if '剩余' in expiry_str:
+            try:
+                if '分钟' in expiry_str:
+                    minutes = int(expiry_str.split('剩余')[1].split('分钟')[0])
+                    return minutes / (24 * 60)  # 转换为天数
+                elif '小时' in expiry_str:
+                    hours = int(expiry_str.split('剩余')[1].split('小时')[0])
+                    return hours / 24  # 转换为天数
+                elif '天' in expiry_str:
+                    days = int(expiry_str.split('剩余')[1].split('天')[0])
+                    return days
+            except:
+                pass
+        
+        # 处理日期格式 (YYYY-MM-DD 或 YYYY/MM/DD)
+        if '-' in expiry_str or '/' in expiry_str:
+            try:
+                from datetime import datetime
+                # 只取日期部分
+                date_str = expiry_str.split(' ')[0] if ' ' in expiry_str else expiry_str
+                
+                # 尝试不同的日期格式
+                for fmt in ['%Y-%m-%d', '%Y/%m/%d', '%d-%m-%Y', '%d/%m/%Y']:
+                    try:
+                        expiry_date = datetime.strptime(date_str, fmt)
+                        # 计算距离今天的天数
+                        days_remaining = (expiry_date - datetime.now()).days
+                        return days_remaining if days_remaining >= 0 else -1
+                    except:
+                        continue
+            except:
+                pass
+        
+        # 默认放在中间
+        return 9999
     
     def import_accounts(self):
         """导入账户"""
@@ -1113,6 +1198,28 @@ class AccountCardPage(QWidget):
     def apply_advanced_filter(self, criteria):
         """应用高级筛选条件"""
         # TODO: 实现高级筛选逻辑
+        self.update_table_view()
+    
+    def on_header_clicked(self, logical_index):
+        """处理表头点击事件进行排序"""
+        # 不对选择列（第0列）和操作列（第5列）进行排序
+        if logical_index == 0 or logical_index == 5:
+            return
+        
+        # 如果点击的是同一列，切换排序顺序
+        if self.sort_column == logical_index:
+            self.sort_order = Qt.DescendingOrder if self.sort_order == Qt.AscendingOrder else Qt.AscendingOrder
+        else:
+            # 如果点击的是新列，设置为该列并使用默认排序顺序
+            self.sort_column = logical_index
+            # 账户过期列默认升序（最快过期的在前），其他列默认升序
+            self.sort_order = Qt.AscendingOrder
+        
+        # 更新表头显示排序指示器
+        header = self.table_widget.horizontalHeader()
+        header.setSortIndicator(logical_index, self.sort_order)
+        
+        # 刷新表格显示
         self.update_table_view()
 
 
