@@ -835,9 +835,10 @@ class MainWindow(QMainWindow):
         """Handle page change from sidebar"""
         self.stacked_widget.setCurrentIndex(index)
         
-        # Update home page stats when switching to home
+        # 切换到首页时，只更新代理状态，不重新解密数据
+        # 数据更新由定时器和手动刷新控制
         if index == 0 and hasattr(self, 'home_page'):
-            self.home_page.update_stats()
+            # 只更新代理状态显示
             self.home_page.update_proxy_status(self.proxy_enabled)
     
     def on_sidebar_toggled(self, is_expanded):

@@ -117,12 +117,13 @@ class HomePage(QWidget):
         self.account_manager = account_manager
         self.warp_data_reader = WarpUserDataManager()
         self.registry_manager = warp_registry_manager  # 添加注册表管理器
+        self.last_update_time = 0  # 跟踪上次更新时间，避免重复解密
         self.init_ui()
         
         # Setup timer for periodic updates
         self.update_timer = QTimer()
         self.update_timer.timeout.connect(self.update_stats)
-        self.update_timer.start(30000)  # Update every 30 seconds for real-time data
+        self.update_timer.start(120000)  # Update every 2 minutes (120 seconds) to reduce decryption frequency
         
         # Initial stats update
         self.update_stats()
@@ -553,9 +554,9 @@ class HomePage(QWidget):
         header_layout.addStretch()
         
         # Status indicator
-        self.status_indicator = QLabel("● 在线")
+        self.status_indicator = QLabel("🔄 加载中...")
         self.status_indicator.setFont(QFont("Segoe UI", 9, QFont.Medium))  # 减小状态字号
-        self.status_indicator.setStyleSheet(f"color: {theme_manager.get_color('accent_green')}; background: transparent;")
+        self.status_indicator.setStyleSheet(f"color: {theme_manager.get_color('text_secondary')}; background: transparent;")
         header_layout.addWidget(self.status_indicator)
         
         layout.addLayout(header_layout)
@@ -564,35 +565,31 @@ class HomePage(QWidget):
         info_section = QVBoxLayout()
         info_section.setSpacing(8)  # 减少信息间距
         
-        # Email field - 添加圆角背景
-        self.email_label = QLabel("邮箱地址: scottg2020@newbt.dpdns.org")
-        self.email_label.setProperty("class", "field")  # 设置class属性以应用圆角样式
+        # Email field
+        self.email_label = QLabel("邮箱地址: 加载中...")
         self.email_label.setFont(QFont("Segoe UI", 11))
         self.email_label.setStyleSheet(f"color: {theme_manager.get_color('accent_blue')};")
         self.email_label.setWordWrap(True)  # 启用自动换行
         self.email_label.setTextInteractionFlags(Qt.TextSelectableByMouse)  # 允许选择文本
         info_section.addWidget(self.email_label)
         
-        # User ID field - 添加圆角背景
-        self.user_id_label = QLabel("用户ID: t9yuLuaoU6P45wWkie4l...")
-        self.user_id_label.setProperty("class", "field")  # 设置class属性以应用圆角样式
+        # User ID field
+        self.user_id_label = QLabel("用户ID: 加载中...")
         self.user_id_label.setFont(QFont("Segoe UI", 11))
         self.user_id_label.setStyleSheet(f"color: {theme_manager.get_color('text_secondary')};")
         self.user_id_label.setWordWrap(True)  # 启用自动换行
         self.user_id_label.setTextInteractionFlags(Qt.TextSelectableByMouse)  # 允许选择文本
         info_section.addWidget(self.user_id_label)
         
-        # Token status field - 添加圆角背景
-        self.token_status_label = QLabel("令牌状态: ✅ 有效")
-        self.token_status_label.setProperty("class", "field")  # 设置class属性以应用圆角样式
+        # Token status field
+        self.token_status_label = QLabel("令牌状态: 加载中...")
         self.token_status_label.setFont(QFont("Segoe UI", 11))
         self.token_status_label.setStyleSheet(f"color: {theme_manager.get_color('text_secondary')};")
         self.token_status_label.setWordWrap(True)  # 启用自动换行
         info_section.addWidget(self.token_status_label)
         
-        # Token expiry field - 添加圆角背景
-        self.token_expiry_label = QLabel("令牌过期: 2025-09-22 15:39 (剩余59分钟)")
-        self.token_expiry_label.setProperty("class", "field")  # 设置class属性以应用圆角样式
+        # Token expiry field
+        self.token_expiry_label = QLabel("令牌过期: 加载中...")
         self.token_expiry_label.setFont(QFont("Segoe UI", 11))
         self.token_expiry_label.setStyleSheet(f"color: {theme_manager.get_color('accent_orange')};")
         self.token_expiry_label.setWordWrap(True)  # 启用自动换行
@@ -646,53 +643,62 @@ class HomePage(QWidget):
         plan_type = "Trial Pro" if refresh_duration == "EveryTwoWeeks" else "Pro"
         self.plan_label = QLabel(f"套餐类型: {plan_type}")
         self.plan_label.setFont(QFont("Segoe UI", 11, QFont.Medium))
-        self.plan_label.setStyleSheet(f"""
-            QLabel {{
-                color: {theme_manager.get_color('accent_blue')};
-                background: rgba(255, 255, 255, 0.1);
-                border: 1px solid rgba(255, 255, 255, 0.2);
-                border-radius: 8px;
-                padding: 8px 12px;
-            }}
-        """)
+        self.plan_label.setStyleSheet(f"color: {theme_manager.get_color('accent_blue')};")
         details_section.addWidget(self.plan_label)
         
-        # 使用量
+        # 使用量 - 用进度条显示
         limit = limit_data.get("limit", 2500)
         used = limit_data.get("num_requests_used_since_refresh", 0)
-        self.usage_label = QLabel(f"使用量: {used} / {limit} 次")
+        usage_percent = limit_data.get('usage_percentage', 0)
+        
+        # 使用量标签
+        self.usage_label = QLabel(f"使用量：{used}/{limit}")
         self.usage_label.setFont(QFont("Segoe UI", 11))
-        self.usage_label.setStyleSheet(f"""
-            QLabel {{
-                color: {theme_manager.get_color('text_secondary')};
-                background: rgba(255, 255, 255, 0.1);
-                border: 1px solid rgba(255, 255, 255, 0.2);
-                border-radius: 8px;
-                padding: 8px 12px;
-            }}
-        """)
+        self.usage_label.setStyleSheet(f"color: {theme_manager.get_color('text_secondary')};")
         details_section.addWidget(self.usage_label)
         
-        # 使用率（直接从注册表管理器获取）
-        usage_percent = limit_data.get('usage_percentage', 0)
-        percent_color = theme_manager.get_color('accent_green')
-        if usage_percent >= 80:
-            percent_color = theme_manager.get_color('accent_red')
-        elif usage_percent >= 50:
-            percent_color = theme_manager.get_color('accent_orange')
+        # 使用量进度条（不显示文字，更简洁）
+        from PyQt5.QtWidgets import QProgressBar
+        self.usage_progress = QProgressBar()
+        self.usage_progress.setMaximum(100)
+        self.usage_progress.setValue(int(usage_percent))
+        self.usage_progress.setTextVisible(False)  # 不显示进度条内的文字
         
-        self.percentage_label = QLabel(f"使用率: {usage_percent}%")
-        self.percentage_label.setFont(QFont("Segoe UI", 11, QFont.Bold))
-        self.percentage_label.setStyleSheet(f"""
-            QLabel {{
-                color: {percent_color};
-                background: rgba(255, 255, 255, 0.1);
+        # 根据使用率设置进度条颜色
+        if usage_percent >= 80:
+            progress_color = theme_manager.get_color('accent_red')
+        elif usage_percent >= 50:
+            progress_color = theme_manager.get_color('accent_orange')
+        else:
+            progress_color = theme_manager.get_color('accent_green')
+        
+        self.usage_progress.setStyleSheet(f"""
+            QProgressBar {{
                 border: 1px solid rgba(255, 255, 255, 0.2);
                 border-radius: 8px;
-                padding: 8px 12px;
+                background: rgba(255, 255, 255, 0.05);
+                height: 20px;
+                margin: 2px 0;
+            }}
+            QProgressBar::chunk {{
+                background: {progress_color};
+                border-radius: 7px;
             }}
         """)
-        details_section.addWidget(self.percentage_label)
+        details_section.addWidget(self.usage_progress)
+        
+        # 剩余额度（替代原来的使用率）
+        remaining = limit - used
+        remaining_color = theme_manager.get_color('accent_green')
+        if remaining <= limit * 0.2:  # 剩余少于20%
+            remaining_color = theme_manager.get_color('accent_red')
+        elif remaining <= limit * 0.5:  # 剩余少于50%
+            remaining_color = theme_manager.get_color('accent_orange')
+        
+        self.remaining_label = QLabel(f"剩余额度: {remaining} 次")
+        self.remaining_label.setFont(QFont("Segoe UI", 11, QFont.Bold))
+        self.remaining_label.setStyleSheet(f"color: {remaining_color};")
+        details_section.addWidget(self.remaining_label)
         
         # 账户过期时间（直接显示格式化后的时间）
         expiry_time = limit_data.get('next_refresh_time_formatted', '未知')
@@ -709,15 +715,7 @@ class HomePage(QWidget):
             expiry_color = theme_manager.get_color('accent_orange')
         else:
             expiry_color = theme_manager.get_color('accent_green')
-        self.expiry_label.setStyleSheet(f"""
-            QLabel {{
-                color: {expiry_color};
-                background: rgba(255, 255, 255, 0.1);
-                border: 1px solid rgba(255, 255, 255, 0.2);
-                border-radius: 8px;
-                padding: 8px 12px;
-            }}
-        """)
+        self.expiry_label.setStyleSheet(f"color: {expiry_color};")
         details_section.addWidget(self.expiry_label)
         
         # 刷新周期（直接显示原始值）
@@ -725,15 +723,7 @@ class HomePage(QWidget):
         
         self.refresh_label = QLabel(refresh_text)
         self.refresh_label.setFont(QFont("Segoe UI", 11))
-        self.refresh_label.setStyleSheet(f"""
-            QLabel {{
-                color: {theme_manager.get_color('accent_blue')};
-                background: rgba(255, 255, 255, 0.1);
-                border: 1px solid rgba(255, 255, 255, 0.2);
-                border-radius: 8px;
-                padding: 8px 12px;
-            }}
-        """)
+        self.refresh_label.setStyleSheet(f"color: {theme_manager.get_color('accent_blue')};")
         details_section.addWidget(self.refresh_label)
         
         layout.addLayout(details_section)
@@ -781,15 +771,7 @@ class HomePage(QWidget):
         
         self.machine_label = QLabel(f"机器码: {experiment_id}")
         self.machine_label.setFont(QFont("Segoe UI", 11))
-        self.machine_label.setStyleSheet(f"""
-            QLabel {{
-                color: {theme_manager.get_color('accent_blue')};
-                background: rgba(255, 255, 255, 0.1);
-                border: 1px solid rgba(255, 255, 255, 0.2);
-                border-radius: 8px;
-                padding: 8px 12px;
-            }}
-        """)
+        self.machine_label.setStyleSheet(f"color: {theme_manager.get_color('accent_blue')};")
         self.machine_label.setWordWrap(True)
         self.machine_label.setTextInteractionFlags(Qt.TextSelectableByMouse)  # 允许选择文本
         details_layout.addWidget(self.machine_label)
@@ -799,15 +781,7 @@ class HomePage(QWidget):
         
         self.version_label = QLabel(f"软件版本: {version}")
         self.version_label.setFont(QFont("Segoe UI", 11))
-        self.version_label.setStyleSheet(f"""
-            QLabel {{
-                color: {theme_manager.get_color('accent_blue')};
-                background: rgba(255, 255, 255, 0.1);
-                border: 1px solid rgba(255, 255, 255, 0.2);
-                border-radius: 8px;
-                padding: 8px 12px;
-            }}
-        """)
+        self.version_label.setStyleSheet(f"color: {theme_manager.get_color('accent_blue')};")
         self.version_label.setWordWrap(True)
         details_layout.addWidget(self.version_label)
         
@@ -914,10 +888,8 @@ class HomePage(QWidget):
                 # Store current user data for saving
                 self.current_user_data = user_data
                 
-                # Print full user_data to console
-                print(f"🔓 Warp user_data 解密成功:")
-                for key, value in user_data.items():
-                    print(f"  {key}: {value}")
+                # Print brief success message (removed detailed logging to reduce noise)
+                print(f"✅ Warp账户数据更新成功")
                 
             else:
                 raise Exception("Failed to decrypt user data")
@@ -940,8 +912,21 @@ class HomePage(QWidget):
         # Also update header time
         self.update_header_time()
     
-    def update_stats(self):
-        """Update dashboard statistics including Warp status"""
+    def update_stats(self, force=False):
+        """Update dashboard statistics including Warp status
+        
+        Args:
+            force: 是否强制更新，忽略时间间隔检查
+        """
+        import time
+        current_time = time.time()
+        
+        # 如果非强制更新，检查距离上次更新是否超过30秒（避免频繁解密）
+        if not force and (current_time - self.last_update_time) < 30:
+            print("⚠️ 距离上次更新不足30秒，跳过本次更新")
+            return
+            
+        self.last_update_time = current_time
         # Update Warp client status
         self.update_warp_status()
     
@@ -954,7 +939,8 @@ class HomePage(QWidget):
         """Manually refresh Warp status information"""
         print("🔄 手动刷新 Warp 账户状态...")
         self.status_indicator.setText("🔄 刷新中...")
-        self.update_warp_status()
+        # 手动刷新时强制更新
+        self.update_stats(force=True)
     
     def save_current_account(self):
         """Save current Warp account to account manager"""
@@ -974,19 +960,18 @@ class HomePage(QWidget):
             
             # 检查是否已经存在该账户
             if self.account_manager:
-                existing_accounts = self.account_manager.get_all_accounts()
-                for account in existing_accounts:
-                    if account.get('email') == email:
-                        from PyQt5.QtWidgets import QMessageBox
-                        reply = QMessageBox.question(
-                            self, 
-                            "确认覆盖", 
-                            f"账户 {email} 已存在！\n\n是否要更新该账户的信息？",
-                            QMessageBox.Yes | QMessageBox.No
-                        )
-                        if reply != QMessageBox.Yes:
-                            return
-                        break
+                # 直接通过email查询账户是否存在
+                existing_account = self.account_manager.get_account_by_email(email)
+                if existing_account:
+                    from PyQt5.QtWidgets import QMessageBox
+                    reply = QMessageBox.question(
+                        self, 
+                        "确认覆盖", 
+                        f"账户 {email} 已存在！\n\n是否要更新该账户的信息？",
+                        QMessageBox.Yes | QMessageBox.No
+                    )
+                    if reply != QMessageBox.Yes:
+                        return
             
             # 准备保存的账户数据
             account_data = {

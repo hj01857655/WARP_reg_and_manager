@@ -1257,7 +1257,7 @@ class AdvancedFilterDialog(QDialog):
             Qt.Horizontal, self
         )
         buttons.accepted.connect(self.accept)
-        buttons.cancelled.connect(self.reject)
+        buttons.rejected.connect(self.reject)
         layout.addWidget(buttons)
         
         self.setLayout(layout)

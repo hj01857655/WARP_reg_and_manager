@@ -205,6 +205,14 @@ class ThemeManager:
                 padding: 6px 10px;
                 margin: 2px;
             }}
+            /* 特殊容器样式 - 用于包含多个组件的QWidget */
+            QWidget#UsageContainer {{
+                background: rgba(255, 255, 255, 0.05);
+                border: 1px solid rgba(255, 255, 255, 0.1);
+                border-radius: 8px;
+                padding: 6px 10px;
+                margin: 2px;
+            }}
         """
     
     def get_button_style(self, button_type='primary'):
