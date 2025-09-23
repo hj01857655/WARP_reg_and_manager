@@ -209,7 +209,13 @@ class ThemeManager:
     
     def get_button_style(self, button_type='primary'):
         """获取按钮样式"""
-        if button_type == 'primary':
+        if button_type == 'secondary':
+            return self.get_secondary_button_style()
+        elif button_type == 'warning':
+            return self.get_warning_button_style()
+        elif button_type == 'danger':
+            return self.get_danger_button_style()
+        elif button_type == 'primary':
             return f"""
                 QPushButton {{
                     background: qlineargradient(
@@ -397,7 +403,142 @@ class ThemeManager:
                 background-color: {self.colors['background_tertiary']};
             }}
             """
-
+    
+    def get_secondary_button_style(self):
+        """获取次要按钮样式"""
+        return f"""
+            QPushButton {{
+                background-color: {self.colors['background_secondary']};
+                color: {self.colors['text_primary']};
+                border: 1px solid {self.colors['border_light']};
+                border-radius: 10px;
+                padding: 8px 16px;
+            }}
+            QPushButton:hover {{
+                background-color: {self.colors['background_tertiary']};
+                border-color: {self.colors['border_medium']};
+            }}
+            QPushButton:pressed {{
+                background-color: {self.colors['background_primary']};
+            }}
+        """
+    
+    def get_warning_button_style(self):
+        """获取警告按钮样式"""
+        return f"""
+            QPushButton {{
+                background: qlineargradient(
+                    x1: 0, y1: 0, x2: 0, y2: 1,
+                    stop: 0 {self.colors['accent_orange']},
+                    stop: 1 #d97706
+                );
+                color: white;
+                border: 1px solid rgba(245, 158, 11, 0.3);
+                border-radius: 10px;
+                padding: 8px 16px;
+            }}
+            QPushButton:hover {{
+                background: qlineargradient(
+                    x1: 0, y1: 0, x2: 0, y2: 1,
+                    stop: 0 #fbbf24,
+                    stop: 1 {self.colors['accent_orange']}
+                );
+            }}
+            QPushButton:pressed {{
+                background: qlineargradient(
+                    x1: 0, y1: 0, x2: 0, y2: 1,
+                    stop: 0 #d97706,
+                    stop: 1 #b45309
+                );
+            }}
+        """
+    
+    def get_danger_button_style(self):
+        """获取危险按钮样式"""
+        return f"""
+            QPushButton {{
+                background: qlineargradient(
+                    x1: 0, y1: 0, x2: 0, y2: 1,
+                    stop: 0 {self.colors['accent_red']},
+                    stop: 1 #dc2626
+                );
+                color: white;
+                border: 1px solid rgba(239, 68, 68, 0.3);
+                border-radius: 10px;
+                padding: 8px 16px;
+            }}
+            QPushButton:hover {{
+                background: qlineargradient(
+                    x1: 0, y1: 0, x2: 0, y2: 1,
+                    stop: 0 #f87171,
+                    stop: 1 {self.colors['accent_red']}
+                );
+            }}
+            QPushButton:pressed {{
+                background: qlineargradient(
+                    x1: 0, y1: 0, x2: 0, y2: 1,
+                    stop: 0 #dc2626,
+                    stop: 1 #b91c1c
+                );
+            }}
+        """
+    
+    def get_search_input_style(self):
+        """获取搜索输入框样式"""
+        return f"""
+            QLineEdit {{
+                background-color: {self.colors['background_primary']};
+                border: 1px solid {self.colors['border_light']};
+                border-radius: 8px;
+                padding: 8px 12px;
+                font-size: 14px;
+                color: {self.colors['text_primary']};
+                min-width: 250px;
+            }}
+            QLineEdit:focus {{
+                border-color: {self.colors['accent_blue']};
+                outline: none;
+            }}
+            QLineEdit:hover {{
+                border-color: {self.colors['border_medium']};
+            }}
+        """
+    
+    def get_table_style(self):
+        """获取表格统一样式"""
+        return f"""
+            QTableWidget {{
+                background-color: {self.colors['background_primary']};
+                border: 1px solid {self.colors['border_light']};
+                border-radius: 12px;
+                gridline-color: {self.colors['border_light']};
+                selection-background-color: rgba(59, 130, 246, 0.1);
+            }}
+            QTableWidget::item {{
+                padding: 10px;
+                border: none;
+                color: {self.colors['text_primary']};
+            }}
+            QTableWidget::item:selected {{
+                background-color: rgba(59, 130, 246, 0.1);
+                color: {self.colors['text_primary']};
+            }}
+            QTableWidget::item:hover {{
+                background-color: {self.colors['background_secondary']};
+            }}
+            QHeaderView::section {{
+                background-color: {self.colors['background_secondary']};
+                color: {self.colors['text_primary']};
+                padding: 12px 8px;
+                border: none;
+                border-bottom: 2px solid {self.colors['border_light']};
+                font-weight: 600;
+                min-height: 45px;
+            }}
+            QHeaderView::section:hover {{
+                background-color: {self.colors['background_tertiary']};
+            }}
+        """
     def get_dialog_style(self):
         """获取对话框样式"""
         return f"""

@@ -391,22 +391,10 @@ class AccountCardPage(QWidget):
     
     def init_ui(self):
         """Initialize the page UI"""
-        # Create main container card
+        # Create main container card - 使用全局统一样式
         main_container = QFrame()
         main_container.setFrameStyle(QFrame.NoFrame)
-        main_container.setStyleSheet("""
-            QFrame {
-                background: qlineargradient(
-                    x1: 0, y1: 0, x2: 1, y2: 1,
-                    stop: 0 rgba(255, 255, 255, 0.98),
-                    stop: 0.5 rgba(248, 250, 252, 0.95),
-                    stop: 1 rgba(241, 245, 249, 0.98)
-                );
-                border: 1px solid rgba(226, 232, 240, 0.8);
-                border-radius: 20px;
-                margin: 10px;
-            }
-        """)
+        main_container.setStyleSheet(theme_manager.get_main_container_style())
         
         # Container layout
         container_layout = QVBoxLayout(main_container)
@@ -445,15 +433,27 @@ class AccountCardPage(QWidget):
         # Page title - 与home_page和cleanup_page相同的样式
         title_label = QLabel("👥 账户管理")
         title_label.setFont(QFont("Segoe UI", 18, QFont.Bold))  # 统一字号
-        title_label.setStyleSheet(f"color: {theme_manager.get_color('text_primary')}; background: transparent; border: none; outline: none; border-radius: 8px; padding: 6px 12px;")
-        title_label.setObjectName("title")  # 设置objectName以排除全局样式
+        title_label.setStyleSheet(f"""
+            color: {theme_manager.get_color('text_primary')};
+            background: transparent;
+            border: none;
+            padding: 0;
+            margin: 0;
+        """)
+        title_label.setProperty("class", "title")
         left_layout.addWidget(title_label)
         
         # Page description - 与home_page和cleanup_page相同的样式
         desc_label = QLabel("查看和管理当前Warp Terminal账户信息")
         desc_label.setFont(QFont("Segoe UI", 11))  # 统一字号
-        desc_label.setStyleSheet(f"color: {theme_manager.get_color('text_secondary')}; background: transparent; border: none; outline: none; border-radius: 6px; padding: 4px 8px;")
-        desc_label.setObjectName("title")  # 设置objectName以排除全局样式
+        desc_label.setStyleSheet(f"""
+            color: {theme_manager.get_color('text_secondary')};
+            background: transparent;
+            border: none;
+            padding: 0;
+            margin: 0;
+        """)
+        desc_label.setProperty("class", "title")
         left_layout.addWidget(desc_label)
         
         layout.addLayout(left_layout)
@@ -518,23 +518,10 @@ class AccountCardPage(QWidget):
         
         layout.addStretch()
         
-        # 搜索框
+        # 搜索框 - 使用全局统一样式
         self.search_input = QLineEdit()
         self.search_input.setPlaceholderText("🔍 搜索账号...")
-        self.search_input.setStyleSheet("""
-            QLineEdit {
-                background-color: white;
-                border: 1px solid #ced4da;
-                border-radius: 6px;
-                padding: 8px 12px;
-                font-size: 14px;
-                min-width: 250px;
-            }
-            QLineEdit:focus {
-                border-color: #007AFF;
-                outline: none;
-            }
-        """)
+        self.search_input.setStyleSheet(theme_manager.get_search_input_style())
         self.search_input.textChanged.connect(self.on_search_text_changed)
         layout.addWidget(self.search_input)
         
@@ -566,34 +553,9 @@ class AccountCardPage(QWidget):
         self.select_all_checkbox.setToolTip('全选/取消全选')
         self.select_all_checkbox.stateChanged.connect(self.toggle_select_all)
         
-        # 表格样式 - 移除可能导致表头被截断的固定高度
+        # 表格样式 - 使用全局统一样式
         self.table_widget.setAlternatingRowColors(True)
-        self.table_widget.setStyleSheet("""
-            QTableWidget {
-                background-color: #ffffff;
-                border: 1px solid #e0e0e0;
-                border-radius: 10px;
-                gridline-color: #f0f0f0;
-            }
-            QTableWidget::item {
-                padding: 8px;
-                border: none;
-                min-height: 40px;
-            }
-            QTableWidget::item:selected {
-                background-color: rgba(0, 122, 255, 0.1);
-                color: #1a1a1a;
-            }
-            QHeaderView::section {
-                background-color: #f8f9fa;
-                color: #495057;
-                padding: 12px 8px;
-                border: none;
-                border-bottom: 2px solid #dee2e6;
-                font-weight: bold;
-                min-height: 45px;
-            }
-        """)
+        self.table_widget.setStyleSheet(theme_manager.get_table_style())
         
         # 设置表头
         header = self.table_widget.horizontalHeader()
@@ -680,13 +642,13 @@ class AccountCardPage(QWidget):
             status = self.get_account_status_text(account)
             status_item = QTableWidgetItem(status)
             status_item.setTextAlignment(Qt.AlignCenter)
-            # 根据状态设置颜色
+            # 根据状态设置颜色 - 使用全局颜色
             if account.get('is_active'):
-                status_item.setForeground(QColor('#10B981'))
+                status_item.setForeground(QColor(theme_manager.get_color('accent_green')))
             elif account.get('status') == 'banned':
-                status_item.setForeground(QColor('#EF4444'))
+                status_item.setForeground(QColor(theme_manager.get_color('accent_red')))
             else:
-                status_item.setForeground(QColor('#F59E0B'))
+                status_item.setForeground(QColor(theme_manager.get_color('accent_orange')))
             self.table_widget.setItem(row, 2, status_item)
             
             # 限制 (显示用量/限制)
@@ -695,15 +657,15 @@ class AccountCardPage(QWidget):
             limit_text = f"{usage}/{limit} GB"
             limit_item = QTableWidgetItem(limit_text)
             limit_item.setTextAlignment(Qt.AlignCenter)
-            # 根据使用率设置颜色
+            # 根据使用率设置颜色 - 使用全局颜色
             try:
                 usage_percent = (float(usage) / float(limit)) * 100
                 if usage_percent >= 90:
-                    limit_item.setForeground(QColor('#EF4444'))  # 红色
+                    limit_item.setForeground(QColor(theme_manager.get_color('accent_red')))
                 elif usage_percent >= 70:
-                    limit_item.setForeground(QColor('#F59E0B'))  # 橙色
+                    limit_item.setForeground(QColor(theme_manager.get_color('accent_orange')))
                 else:
-                    limit_item.setForeground(QColor('#10B981'))  # 绿色
+                    limit_item.setForeground(QColor(theme_manager.get_color('accent_green')))
             except:
                 pass
             self.table_widget.setItem(row, 3, limit_item)
