@@ -432,6 +432,100 @@ class DatabaseManager:
         except Exception as e:
             print(f"Proxy setting delete error: {e}")
             return False
+    
+    # Import/Export methods
+    def get_all_accounts_for_export(self) -> List[dict]:
+        """Get all accounts formatted for export"""
+        accounts = []
+        try:
+            with sqlite3.connect(self.db_path) as conn:
+                cursor = conn.cursor()
+                cursor.execute('''
+                    SELECT email, account_data, health_status, limit_info, next_refresh_time, created_at
+                    FROM accounts ORDER BY created_at ASC
+                ''')
+                
+                for row in cursor.fetchall():
+                    email, account_data_str, health_status, limit_info, next_refresh_time, created_at = row
+                    account_data = json.loads(account_data_str)
+                    
+                    export_item = {
+                        'email': email,
+                        'uid': account_data.get('uid'),
+                        'account_data': account_data,
+                        'health': health_status or 'healthy',
+                        'limit_info': limit_info,
+                        'next_refresh_time': next_refresh_time,
+                        'created_at': created_at
+                    }
+                    accounts.append(export_item)
+                    
+        except Exception as e:
+            print(f"Export data retrieval error: {e}")
+        return accounts
+    
+    def get_account_by_email(self, email: str) -> Optional[dict]:
+        """Get single account by email"""
+        try:
+            with sqlite3.connect(self.db_path) as conn:
+                cursor = conn.cursor()
+                cursor.execute('SELECT account_data FROM accounts WHERE email = ?', (email,))
+                result = cursor.fetchone()
+                if result:
+                    return json.loads(result[0])
+        except Exception as e:
+            print(f"Get account error: {e}")
+        return None
+    
+    def add_account_from_json(self, account: dict) -> bool:
+        """Add account from import JSON format"""
+        try:
+            email = account.get('email')
+            if not email:
+                return False
+            
+            # Extract account data
+            account_data = account.get('account_data', account)
+            
+            # Ensure required fields
+            if 'uid' not in account_data:
+                account_data['uid'] = account.get('uid', '')
+            if 'email' not in account_data:
+                account_data['email'] = email
+            
+            # Get optional fields
+            health_status = account.get('health', 'healthy')
+            limit_info = account.get('limit_info', 'Not updated')
+            next_refresh_time = account.get('next_refresh_time')
+            
+            with sqlite3.connect(self.db_path) as conn:
+                cursor = conn.cursor()
+                
+                # Check if account exists
+                cursor.execute('SELECT id FROM accounts WHERE email = ?', (email,))
+                exists = cursor.fetchone()
+                
+                if exists:
+                    # Update existing
+                    cursor.execute('''
+                        UPDATE accounts 
+                        SET account_data = ?, health_status = ?, limit_info = ?, 
+                            next_refresh_time = ?, last_updated = CURRENT_TIMESTAMP
+                        WHERE email = ?
+                    ''', (json.dumps(account_data), health_status, limit_info, next_refresh_time, email))
+                else:
+                    # Insert new
+                    cursor.execute('''
+                        INSERT INTO accounts (email, account_data, health_status, limit_info, next_refresh_time, created_at)
+                        VALUES (?, ?, ?, ?, ?, datetime('now'))
+                    ''', (email, json.dumps(account_data), health_status, limit_info, next_refresh_time))
+                
+                conn.commit()
+                return True
+                
+        except Exception as e:
+            print(f"Import account error: {e}")
+            return False
 
 
 # Legacy compatibility wrapper

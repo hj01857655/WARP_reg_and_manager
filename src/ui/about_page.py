@@ -12,6 +12,7 @@ from PyQt5.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel,
 from PyQt5.QtCore import Qt, QUrl
 from PyQt5.QtGui import QFont, QDesktopServices, QPixmap
 from src.config.languages import _
+from src.ui.theme_manager import theme_manager
 
 
 class InfoCard(QFrame):
@@ -28,29 +29,30 @@ class InfoCard(QFrame):
         # Title
         self.title_label = QLabel(title)
         self.title_label.setFont(QFont("Segoe UI", 12, QFont.Bold))
-        self.title_label.setStyleSheet("color: #63b3ed;")
+        self.title_label.setStyleSheet(f"color: {theme_manager.get_color('accent_blue')}; background: transparent; border: none; outline: none; border-radius: 8px; padding: 6px 12px;")
         layout.addWidget(self.title_label)
         
         # Content
         self.content_label = QLabel(content)
         self.content_label.setFont(QFont("Segoe UI", 10))
-        self.content_label.setStyleSheet("color: #e2e8f0; line-height: 1.4;")
+        self.content_label.setStyleSheet(f"color: {theme_manager.get_color('text_primary')}; line-height: 1.4; background: transparent; border: none; outline: none; border-radius: 6px; padding: 4px 8px;")
         self.content_label.setWordWrap(True)
         self.content_label.setTextInteractionFlags(Qt.TextSelectableByMouse)
         layout.addWidget(self.content_label)
         
         self.setLayout(layout)
         
-        # Card styling
+        # Card styling - Light theme
         self.setStyleSheet("""
             InfoCard {
-                background-color: rgba(45, 55, 72, 0.6);
-                border: 1px solid rgba(74, 85, 104, 0.5);
+                background-color: rgba(255, 255, 255, 0.9);
+                border: 1px solid rgba(226, 232, 240, 0.8);
                 border-radius: 12px;
                 margin: 5px 0;
             }
             InfoCard:hover {
-                border-color: rgba(99, 179, 237, 0.5);
+                border-color: rgba(59, 130, 246, 0.5);
+                background-color: rgba(248, 250, 252, 0.95);
             }
         """)
 
@@ -64,60 +66,121 @@ class AboutPage(QWidget):
     
     def init_ui(self):
         """Initialize about page UI"""
-        # Main scroll area
+        # Create main container card
+        main_container = QFrame()
+        main_container.setFrameStyle(QFrame.NoFrame)
+        main_container.setStyleSheet("""
+            QFrame {
+                background: qlineargradient(
+                    x1: 0, y1: 0, x2: 1, y2: 1,
+                    stop: 0 rgba(255, 255, 255, 0.98),
+                    stop: 0.5 rgba(248, 250, 252, 0.95),
+                    stop: 1 rgba(241, 245, 249, 0.98)
+                );
+                border: 1px solid rgba(226, 232, 240, 0.8);
+                border-radius: 20px;
+                margin: 10px;
+            }
+        """)
+        
+        # 与第1/2页一致：主容器直接承载页头，设置统一边距/间距
+        container_layout = QVBoxLayout(main_container)
+        container_layout.setContentsMargins(30, 25, 30, 25)
+        container_layout.setSpacing(25)
+        
+        # 统一页头（标题+描述）放在卡片顶部、滚动区域之外
+        page_header = self.create_page_header()
+        container_layout.addWidget(page_header)
+        
+        # 其余内容放入滚动区域，避免影响页头位置
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
         scroll.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
         scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        scroll.setStyleSheet("""
+            QScrollArea {
+                background: transparent;
+                border: none;
+            }
+        """)
         
-        # Content widget
+        # 滚动内容容器
         content_widget = QWidget()
-        layout = QVBoxLayout()
-        layout.setContentsMargins(30, 20, 30, 20)
-        layout.setSpacing(25)
+        content_layout = QVBoxLayout()
+        content_layout.setContentsMargins(0, 0, 0, 0)
+        content_layout.setSpacing(25)
         
-        # Header section
-        header_section = self.create_header_section()
-        layout.addWidget(header_section)
-        
-        # Application info section (includes version and changelog)
+        # 应用信息
         app_info_section = self.create_app_info_section()
-        layout.addWidget(app_info_section)
+        content_layout.addWidget(app_info_section)
         
-        # Technology stack section
+        # 技术栈
         tech_stack_section = self.create_tech_stack_section()
-        layout.addWidget(tech_stack_section)
+        content_layout.addWidget(tech_stack_section)
         
-        # System info section (comprehensive system details)
+        # 系统信息
         system_info_section = self.create_system_info_section()
-        layout.addWidget(system_info_section)
+        content_layout.addWidget(system_info_section)
         
-        # Author and contact section
+        # 作者与联系
         author_section = self.create_author_section()
-        layout.addWidget(author_section)
+        content_layout.addWidget(author_section)
         
-        # Credits section
+        # 致谢
         credits_section = self.create_credits_section()
-        layout.addWidget(credits_section)
+        content_layout.addWidget(credits_section)
         
-        # Links section (GitHub, Telegram)
+        # 链接
         links_section = self.create_links_section()
-        layout.addWidget(links_section)
+        content_layout.addWidget(links_section)
         
-        # License section (legal information)
+        # 许可证
         license_section = self.create_license_section()
-        layout.addWidget(license_section)
+        content_layout.addWidget(license_section)
         
-        layout.addStretch()
-        content_widget.setLayout(layout)
-        
+        content_layout.addStretch()
+        content_widget.setLayout(content_layout)
         scroll.setWidget(content_widget)
         
-        # Main layout
+        # 将滚动区加入主容器
+        container_layout.addWidget(scroll)
+        
+        # 主布局
         main_layout = QVBoxLayout()
         main_layout.setContentsMargins(0, 0, 0, 0)
-        main_layout.addWidget(scroll)
+        main_layout.addWidget(main_container)
         self.setLayout(main_layout)
+    
+    def create_page_header(self):
+        """Create unified page header with title and description"""
+        header = QWidget()
+        layout = QHBoxLayout()
+        layout.setContentsMargins(0, 0, 0, 10)  # 与home_page和cleanup_page一致
+        layout.setSpacing(12)  # 与home_page和cleanup_page一致
+        
+        # Left side - Title and description
+        left_layout = QVBoxLayout()
+        left_layout.setSpacing(4)  # 与home_page和cleanup_page一致
+        
+        # Page title - 统一所有页面的标题样式
+        title_label = QLabel("📝 关于")
+        title_label.setFont(QFont("Segoe UI", 18, QFont.Bold))  # 统一字号
+        title_label.setStyleSheet(f"color: {theme_manager.get_color('text_primary')}; background: transparent; border: none; outline: none; border-radius: 8px; padding: 6px 12px;")
+        title_label.setObjectName("title")  # 设置objectName以排除全局样式
+        left_layout.addWidget(title_label)
+        
+        # Page description - 统一所有页面的描述样式
+        desc_label = QLabel("应用程序信息和版本说明")
+        desc_label.setFont(QFont("Segoe UI", 11))  # 统一字号
+        desc_label.setStyleSheet(f"color: {theme_manager.get_color('text_secondary')}; background: transparent; border: none; outline: none; border-radius: 6px; padding: 4px 8px;")
+        desc_label.setObjectName("title")  # 设置objectName以排除全局样式
+        left_layout.addWidget(desc_label)
+        
+        layout.addLayout(left_layout)
+        layout.addStretch()
+        
+        header.setLayout(layout)
+        return header
     
     def create_header_section(self):
         """Create header with logo and title"""
@@ -130,26 +193,27 @@ class AboutPage(QWidget):
         logo_label = QLabel("🚀")
         logo_label.setFont(QFont("Segoe UI Emoji", 48))
         logo_label.setAlignment(Qt.AlignCenter)
+        logo_label.setStyleSheet("background: transparent; border: none; outline: none; border-radius: 8px; padding: 6px;")
         layout.addWidget(logo_label)
         
         # App title
         self.title_label = QLabel(_('about_app_title'))
         self.title_label.setFont(QFont("Segoe UI", 28, QFont.Bold))
-        self.title_label.setStyleSheet("color: #63b3ed;")
+        self.title_label.setStyleSheet(f"color: {theme_manager.get_color('accent_blue')}; background: transparent; border: none; outline: none; border-radius: 8px; padding: 6px 12px;")
         self.title_label.setAlignment(Qt.AlignCenter)
         layout.addWidget(self.title_label)
         
         # Version
         self.version_label = QLabel(_('about_version'))
         self.version_label.setFont(QFont("Segoe UI", 14))
-        self.version_label.setStyleSheet("color: #a0aec0;")
+        self.version_label.setStyleSheet(f"color: {theme_manager.get_color('text_secondary')}; background: transparent; border: none; outline: none; border-radius: 6px; padding: 4px 8px;")
         self.version_label.setAlignment(Qt.AlignCenter)
         layout.addWidget(self.version_label)
         
         # Description
         self.desc_label = QLabel(_('about_description'))
         self.desc_label.setFont(QFont("Segoe UI", 12))
-        self.desc_label.setStyleSheet("color: #e2e8f0; line-height: 1.5;")
+        self.desc_label.setStyleSheet(f"color: {theme_manager.get_color('text_primary')}; line-height: 1.5; background: transparent; border: none; outline: none; border-radius: 6px; padding: 4px 8px;")
         self.desc_label.setAlignment(Qt.AlignCenter)
         self.desc_label.setWordWrap(True)
         layout.addWidget(self.desc_label)
@@ -167,7 +231,7 @@ class AboutPage(QWidget):
         # Section title
         self.app_info_title = QLabel(_('about_app_info_title'))
         self.app_info_title.setFont(QFont("Segoe UI", 18, QFont.Bold))
-        self.app_info_title.setStyleSheet("color: #e2e8f0; margin-bottom: 10px;")
+        self.app_info_title.setStyleSheet(f"color: {theme_manager.get_color('text_primary')}; margin-bottom: 10px; background: transparent; border: none; outline: none; border-radius: 8px; padding: 6px 12px;")
         layout.addWidget(self.app_info_title)
         
         # Version and changelog card
@@ -214,7 +278,7 @@ class AboutPage(QWidget):
         # Section title
         self.tech_title = QLabel(_('about_tech_title'))
         self.tech_title.setFont(QFont("Segoe UI", 18, QFont.Bold))
-        self.tech_title.setStyleSheet("color: #e2e8f0; margin-bottom: 10px;")
+        self.tech_title.setStyleSheet(f"color: {theme_manager.get_color('text_primary')}; margin-bottom: 10px; background: transparent; border: none; outline: none; border-radius: 8px; padding: 6px 12px;")
         layout.addWidget(self.tech_title)
         
         # Core technologies
@@ -225,26 +289,18 @@ class AboutPage(QWidget):
         layout.addWidget(self.core_tech_card)
         
         # Network & Security
-        network_card = InfoCard(
-            "🌐 Network & Security",
-            "• requests 2.25+ - HTTP library for API calls\n"
-            "• urllib3 - HTTP client for Python\n"
-            "• mitmproxy 8.0+ - HTTP/HTTPS proxy server\n"
-            "• cryptography - Cryptographic recipes and primitives\n"
-            "• SSL/TLS - Secure communication protocols"
+        self.network_card = InfoCard(
+            _('about_network_security_title'),
+            _('about_network_security_content')
         )
-        layout.addWidget(network_card)
+        layout.addWidget(self.network_card)
         
         # System Integration
-        system_card = InfoCard(
-            "⚙️ System Integration",
-            "• psutil - System and process utilities\n"
-            "• winreg - Windows registry access (Windows only)\n"
-            "• pathlib - Object-oriented filesystem paths\n"
-            "• threading - Thread-based parallelism\n"
-            "• json - JSON encoder and decoder"
+        self.system_integration_card = InfoCard(
+            _('about_system_integration_title'),
+            _('about_system_integration_content')
         )
-        layout.addWidget(system_card)
+        layout.addWidget(self.system_integration_card)
         
         section.setLayout(layout)
         return section
@@ -257,23 +313,17 @@ class AboutPage(QWidget):
         layout.setSpacing(15)
         
         # Section title
-        title_label = QLabel("👤 Author & Contact")
-        title_label.setFont(QFont("Segoe UI", 18, QFont.Bold))
-        title_label.setStyleSheet("color: #e2e8f0; margin-bottom: 10px;")
-        layout.addWidget(title_label)
+        self.author_title_label = QLabel(_('about_author_contact_title'))
+        self.author_title_label.setFont(QFont("Segoe UI", 18, QFont.Bold))
+        self.author_title_label.setStyleSheet(f"color: {theme_manager.get_color('text_primary')}; margin-bottom: 10px; background: transparent; border: none; outline: none; border-radius: 8px; padding: 6px 12px;")
+        layout.addWidget(self.author_title_label)
         
         # Author info
-        author_card = InfoCard(
-            "🧑‍💻 Development Team",
-            "• Lead Developer: Community Contributors\n"
-            "• UI/UX Designer: Modern Interface Team\n"
-            "• Security Consultant: Privacy Protection Team\n"
-            "• Quality Assurance: Testing & Validation Team\n\n"
-            "📧 Contact: warp.manager@protonmail.com\n"
-            "🌐 Project Website: https://warp-manager.dev\n"
-            "📚 Documentation: https://docs.warp-manager.dev"
+        self.author_card = InfoCard(
+            _('about_dev_team_title'),
+            _('about_dev_team_content')
         )
-        layout.addWidget(author_card)
+        layout.addWidget(self.author_card)
         
         section.setLayout(layout)
         return section
@@ -286,10 +336,10 @@ class AboutPage(QWidget):
         layout.setSpacing(15)
         
         # Section title
-        title_label = QLabel("💻 System Information")
-        title_label.setFont(QFont("Segoe UI", 18, QFont.Bold))
-        title_label.setStyleSheet("color: #e2e8f0; margin-bottom: 10px;")
-        layout.addWidget(title_label)
+        self.system_info_title = QLabel(_('about_system_info_title'))
+        self.system_info_title.setFont(QFont("Segoe UI", 18, QFont.Bold))
+        self.system_info_title.setStyleSheet(f"color: {theme_manager.get_color('text_primary')}; margin-bottom: 10px; background: transparent; border: none; outline: none; border-radius: 8px; padding: 6px 12px;")
+        layout.addWidget(self.system_info_title)
         
         # Operating System Info
         os_info = (
@@ -299,8 +349,8 @@ class AboutPage(QWidget):
             f"• Node Name: {platform.node()}\n"
             f"• Processor: {platform.processor() or 'Unknown'}"
         )
-        os_card = InfoCard("🖥️ Operating System", os_info)
-        layout.addWidget(os_card)
+        self.os_card = InfoCard(_('about_os_info_title'), os_info)
+        layout.addWidget(self.os_card)
         
         # Python Environment Info
         python_info = (
@@ -310,8 +360,8 @@ class AboutPage(QWidget):
             f"• Python Build: {' '.join(platform.python_build())}\n"
             f"• Executable Path: {sys.executable}"
         )
-        python_card = InfoCard("🐍 Python Environment", python_info)
-        layout.addWidget(python_card)
+        self.python_card = InfoCard(_('about_python_env_title'), python_info)
+        layout.addWidget(self.python_card)
         
         # Application Runtime Info
         import os
@@ -325,8 +375,8 @@ class AboutPage(QWidget):
             f"• User Home: {os.path.expanduser('~')}\n"
             f"• Temp Directory: {os.path.dirname(os.path.abspath(__file__))}"
         )
-        app_card = InfoCard("🚀 Application Runtime", app_info)
-        layout.addWidget(app_card)
+        self.app_runtime_card = InfoCard(_('about_app_runtime_title'), app_info)
+        layout.addWidget(self.app_runtime_card)
         
         section.setLayout(layout)
         return section
@@ -339,29 +389,23 @@ class AboutPage(QWidget):
         layout.setSpacing(15)
         
         # Section title
-        title_label = QLabel("👥 Credits & Acknowledgments")
-        title_label.setFont(QFont("Segoe UI", 18, QFont.Bold))
-        title_label.setStyleSheet("color: #e2e8f0; margin-bottom: 10px;")
-        layout.addWidget(title_label)
+        self.credits_title = QLabel(_('about_credits_title'))
+        self.credits_title.setFont(QFont("Segoe UI", 18, QFont.Bold))
+        self.credits_title.setStyleSheet(f"color: {theme_manager.get_color('text_primary')}; margin-bottom: 10px; background: transparent; border: none; outline: none; border-radius: 8px; padding: 6px 12px;")
+        layout.addWidget(self.credits_title)
         
         # Credits info
-        credits_card = InfoCard(
-            "Development Team",
-            "• Lead Developer: Community Contributors\n"
-            "• UI/UX Design: Modern Dark Theme\n"
-            "• Testing: Community Feedback\n"
-            "• Documentation: Integrated Help System"
+        self.credits_dev_team_card = InfoCard(
+            _('about_dev_team_credits_title'),
+            _('about_dev_team_credits_content')
         )
-        layout.addWidget(credits_card)
+        layout.addWidget(self.credits_dev_team_card)
         
-        thanks_card = InfoCard(
-            "Special Thanks",
-            "• Warp.dev for providing the AI coding platform\n"
-            "• PyQt5 community for the excellent GUI framework\n"
-            "• All users who provided feedback and suggestions\n"
-            "• Open source contributors and maintainers"
+        self.thanks_card = InfoCard(
+            _('about_special_thanks_title'),
+            _('about_special_thanks_content')
         )
-        layout.addWidget(thanks_card)
+        layout.addWidget(self.thanks_card)
         
         section.setLayout(layout)
         return section
@@ -374,10 +418,10 @@ class AboutPage(QWidget):
         layout.setSpacing(15)
         
         # Section title
-        title_label = QLabel("🔗 Links & Contact")
-        title_label.setFont(QFont("Segoe UI", 18, QFont.Bold))
-        title_label.setStyleSheet("color: #e2e8f0; margin-bottom: 10px;")
-        layout.addWidget(title_label)
+        self.links_title = QLabel(_('about_links_contact_title'))
+        self.links_title.setFont(QFont("Segoe UI", 18, QFont.Bold))
+        self.links_title.setStyleSheet(f"color: {theme_manager.get_color('text_primary')}; margin-bottom: 10px; background: transparent; border: none; outline: none; border-radius: 8px; padding: 6px 12px;")
+        layout.addWidget(self.links_title)
         
         # Links buttons
         buttons_layout = QHBoxLayout()
@@ -418,10 +462,10 @@ class AboutPage(QWidget):
         layout.setSpacing(15)
         
         # Section title
-        title_label = QLabel("📏 License & Legal Information")
-        title_label.setFont(QFont("Segoe UI", 18, QFont.Bold))
-        title_label.setStyleSheet("color: #e2e8f0; margin-bottom: 10px;")
-        layout.addWidget(title_label)
+        self.license_title = QLabel(_('about_license_title'))
+        self.license_title.setFont(QFont("Segoe UI", 18, QFont.Bold))
+        self.license_title.setStyleSheet(f"color: {theme_manager.get_color('text_primary')}; margin-bottom: 10px; background: transparent; border: none; outline: none; border-radius: 8px; padding: 6px 12px;")
+        layout.addWidget(self.license_title)
         
         # Open Source License
         license_text = """
@@ -440,8 +484,8 @@ The above copyright notice and this permission notice shall be included in all
 copies or substantial portions of the Software.
         """.strip()
         
-        license_card = InfoCard("📜 Open Source License (MIT)", license_text)
-        layout.addWidget(license_card)
+        self.license_card = InfoCard(_('about_mit_license_title'), _('about_mit_license_content'))
+        layout.addWidget(self.license_card)
         
         # Usage Terms and Disclaimer
         terms_text = """
@@ -462,8 +506,8 @@ The developers are not responsible for any misuse, damage, or legal issues
 arising from the use of this software. Users assume full responsibility.
         """.strip()
         
-        terms_card = InfoCard("⚠️ Usage Terms & Disclaimer", terms_text)
-        layout.addWidget(terms_card)
+        self.terms_card = InfoCard(_('about_terms_disclaimer_title'), _('about_terms_disclaimer_content'))
+        layout.addWidget(self.terms_card)
         
         # Third-party Acknowledgments
         acknowledgments_text = """
@@ -479,8 +523,8 @@ arising from the use of this software. Users assume full responsibility.
 This project is not affiliated with Cloudflare Inc.
         """.strip()
         
-        ack_card = InfoCard("🙏 Third-party Acknowledgments", acknowledgments_text)
-        layout.addWidget(ack_card)
+        self.ack_card = InfoCard(_('about_third_party_title'), _('about_third_party_content'))
+        layout.addWidget(self.ack_card)
         
         # Copyright and Source Code notice
         footer_layout = QVBoxLayout()
@@ -488,13 +532,13 @@ This project is not affiliated with Cloudflare Inc.
         
         copyright_label = QLabel("© 2025 Warp Account Manager Contributors. Released under MIT License.")
         copyright_label.setFont(QFont("Segoe UI", 10))
-        copyright_label.setStyleSheet("color: #718096; margin-top: 10px;")
+        copyright_label.setStyleSheet(f"color: {theme_manager.get_color('text_secondary')}; margin-top: 10px; background: transparent; border: none; outline: none; border-radius: 6px; padding: 4px 8px;")
         copyright_label.setAlignment(Qt.AlignCenter)
         footer_layout.addWidget(copyright_label)
         
         source_label = QLabel("📝 Source code available on GitHub: https://github.com/hj01857655/WARP_reg_and_manager")
         source_label.setFont(QFont("Segoe UI", 9))
-        source_label.setStyleSheet("color: #63b3ed; margin-top: 5px;")
+        source_label.setStyleSheet(f"color: {theme_manager.get_color('accent_blue')}; margin-top: 5px; background: transparent; border: none; outline: none; border-radius: 6px; padding: 4px 8px;")
         source_label.setAlignment(Qt.AlignCenter)
         source_label.setOpenExternalLinks(True)
         source_label.setTextFormat(Qt.RichText)
@@ -551,3 +595,40 @@ This project is not affiliated with Cloudflare Inc.
         self.github_btn.setText(_('about_github_btn'))
         self.telegram_btn.setText(_('about_telegram_channel_btn'))
         self.chat_btn.setText(_('about_telegram_chat_btn'))
+        
+        # Update network and system cards
+        self.network_card.title_label.setText(_('about_network_security_title'))
+        self.network_card.content_label.setText(_('about_network_security_content'))
+        
+        self.system_integration_card.title_label.setText(_('about_system_integration_title'))
+        self.system_integration_card.content_label.setText(_('about_system_integration_content'))
+        
+        # Update author section
+        self.author_title_label.setText(_('about_author_contact_title'))
+        self.author_card.title_label.setText(_('about_dev_team_title'))
+        self.author_card.content_label.setText(_('about_dev_team_content'))
+        
+        # Update system info section
+        self.system_info_title.setText(_('about_system_info_title'))
+        self.os_card.title_label.setText(_('about_os_info_title'))
+        self.python_card.title_label.setText(_('about_python_env_title'))
+        self.app_runtime_card.title_label.setText(_('about_app_runtime_title'))
+        
+        # Update credits section
+        self.credits_title.setText(_('about_credits_title'))
+        self.credits_dev_team_card.title_label.setText(_('about_dev_team_credits_title'))
+        self.credits_dev_team_card.content_label.setText(_('about_dev_team_credits_content'))
+        self.thanks_card.title_label.setText(_('about_special_thanks_title'))
+        self.thanks_card.content_label.setText(_('about_special_thanks_content'))
+        
+        # Update links section
+        self.links_title.setText(_('about_links_contact_title'))
+        
+        # Update license section
+        self.license_title.setText(_('about_license_title'))
+        self.license_card.title_label.setText(_('about_mit_license_title'))
+        self.license_card.content_label.setText(_('about_mit_license_content'))
+        self.terms_card.title_label.setText(_('about_terms_disclaimer_title'))
+        self.terms_card.content_label.setText(_('about_terms_disclaimer_content'))
+        self.ack_card.title_label.setText(_('about_third_party_title'))
+        self.ack_card.content_label.setText(_('about_third_party_content'))

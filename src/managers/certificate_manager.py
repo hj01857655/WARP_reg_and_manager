@@ -22,6 +22,8 @@ class CertificateManager:
     def __init__(self):
         self.mitmproxy_dir = Path.home() / ".mitmproxy"
         self.cert_file = self.mitmproxy_dir / "mitmproxy-ca-cert.cer"
+        # Ensure directory exists
+        self.mitmproxy_dir.mkdir(exist_ok=True)
 
     def _is_admin_windows(self):
         """Check if current process has administrative privileges on Windows"""
@@ -41,12 +43,30 @@ class CertificateManager:
             return False
         try:
             if scope == "user":
-                cmd = ["certutil", "-user", "-store", "root", "mitmproxy"]
+                cmd = ["certutil", "-user", "-store", "root"]
             else:
-                cmd = ["certutil", "-store", "root", "mitmproxy"]
-            result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
-            return result.returncode == 0 and "mitmproxy" in result.stdout.lower()
-        except Exception:
+                cmd = ["certutil", "-store", "root"]
+            
+            # Use shorter timeout and better error handling
+            result = subprocess.run(cmd, capture_output=True, text=True, 
+                                  timeout=15, creationflags=subprocess.CREATE_NO_WINDOW)
+            
+            if result.returncode == 0:
+                # Check if mitmproxy certificate is in the output
+                output_lower = result.stdout.lower()
+                return ("mitmproxy" in output_lower or 
+                       "mitmproxy-ca" in output_lower or
+                       "mitmproxy ca" in output_lower)
+            return False
+            
+        except subprocess.TimeoutExpired:
+            print(f"⚠️ Certificate check timeout for {scope} store")
+            return False
+        except FileNotFoundError:
+            print("⚠️ certutil command not found")
+            return False
+        except Exception as e:
+            print(f"⚠️ Certificate check error for {scope} store: {e}")
             return False
 
     def check_certificate_exists(self):
@@ -54,8 +74,8 @@ class CertificateManager:
         return self.cert_file.exists()
 
     def get_certificate_path(self):
-        """Return certificate file path"""
-        return str(self.cert_file)
+        """Return certificate file path as platform-specific string"""
+        return str(self.cert_file.resolve())
 
     def verify_certificate_trust_macos(self):
         """Verify if certificate is properly trusted on macOS"""
@@ -188,7 +208,8 @@ class CertificateManager:
                 try:
                     print("🔐 Attempting to install certificate to LocalMachine\\Root...")
                     cmd_machine = ["certutil", "-addstore", "root", cert_path]
-                    result = subprocess.run(cmd_machine, capture_output=True, text=True, shell=True, timeout=60)
+                    result = subprocess.run(cmd_machine, capture_output=True, text=True, 
+                                          timeout=30, creationflags=subprocess.CREATE_NO_WINDOW)
                     if result.returncode == 0:
                         print(_('cert_installed_success'))
                         print("✅ mitmproxy CA installed in LocalMachine\\Root")
@@ -196,8 +217,19 @@ class CertificateManager:
                     else:
                         error_msg = (result.stderr or result.stdout or "").strip()
                         print(f"⚠️ LocalMachine install failed: {error_msg}")
+                        
+                        # Provide specific guidance based on error
+                        if "access is denied" in error_msg.lower():
+                            print("💡 Solution: Run the application as Administrator to install system-wide certificate")
+                        elif "already exists" in error_msg.lower():
+                            print("ℹ️ Certificate may already be installed, checking...")
+                            if self._is_cert_installed_in_store_windows("machine"):
+                                print("✅ Certificate confirmed installed in LocalMachine\\Root")
+                                return True
+                                
                 except subprocess.TimeoutExpired:
-                    print(_('cert_install_error').format("Certificate installation to LocalMachine timed out"))
+                    print("⚠️ Certificate installation to LocalMachine timed out (30s)")
+                    print("💡 Try running as Administrator or use manual installation")
                 except Exception as e:
                     print(f"⚠️ LocalMachine install error: {e}")
 
@@ -205,88 +237,125 @@ class CertificateManager:
                 try:
                     print("🧩 Falling back to CurrentUser\\Root installation...")
                     cmd_user = ["certutil", "-user", "-addstore", "root", cert_path]
-                    result_user = subprocess.run(cmd_user, capture_output=True, text=True, shell=True, timeout=60)
+                    result_user = subprocess.run(cmd_user, capture_output=True, text=True, 
+                                                timeout=30, creationflags=subprocess.CREATE_NO_WINDOW)
                     if result_user.returncode == 0:
                         print(_('cert_installed_success'))
                         print("✅ mitmproxy CA installed in CurrentUser\\Root")
-                        print("⚠️ WARNING: LocalMachine\\Root installation is recommended for best compatibility. Run the app as Administrator to install system-wide.")
+                        print("⚠️ WARNING: LocalMachine\\Root installation is recommended for best compatibility.")
+                        print("💡 To install system-wide: Run the app as Administrator")
                         return True
                     else:
                         error_msg = (result_user.stderr or result_user.stdout or "").strip()
-                        print(_('cert_install_error').format(error_msg))
+                        print(f"⚠️ CurrentUser install failed: {error_msg}")
+                        
+                        # Check if certificate already exists in CurrentUser store
+                        if "already exists" in error_msg.lower():
+                            print("ℹ️ Certificate may already be installed, checking...")
+                            if self._is_cert_installed_in_store_windows("user"):
+                                print("✅ Certificate confirmed installed in CurrentUser\\Root")
+                                return True
+                        
+                        # Suggest manual installation as last resort
+                        print("💡 Consider manual installation using the batch script")
                         return False
+                        
                 except subprocess.TimeoutExpired:
-                    print(_('cert_install_error').format("Certificate installation to CurrentUser timed out"))
+                    print("⚠️ Certificate installation to CurrentUser timed out (30s)")
+                    print("💡 Try manual installation or restart the application")
                     return False
                 except Exception as e:
-                    print(_('cert_install_error').format(str(e)))
+                    print(f"⚠️ CurrentUser install error: {e}")
+                    print("💡 Use manual installation: double-click fix_certificate.bat")
                     return False
                     
             elif sys.platform == "darwin":
                 # macOS: Use security command with multiple strategies
+                print("🍎 macOS Certificate Installation")
                 
-                # Strategy 1: Try to add to system keychain with trust settings
-                print("Attempting to install certificate to system keychain...")
-                cmd_system = [
-                    "security", "add-trusted-cert", 
-                    "-d",  # Add to admin cert store
-                    "-r", "trustRoot",  # Set trust policy 
-                    "-k", "/Library/Keychains/System.keychain",
-                    cert_path
-                ]
-                result_system = subprocess.run(cmd_system, capture_output=True, text=True)
-                
-                if result_system.returncode == 0:
-                    print(_('cert_installed_success'))
-                    return True
-                else:
-                    print(f"System keychain failed: {result_system.stderr}")
-                
-                # Strategy 2: Add to login keychain with explicit trust
-                print("Attempting to install certificate to login keychain...")
-                user_keychain = os.path.expanduser("~/Library/Keychains/login.keychain-db")
-                
-                # First add the certificate
-                cmd_add = ["security", "add-cert", "-k", user_keychain, cert_path]
-                result_add = subprocess.run(cmd_add, capture_output=True, text=True)
-                
-                if result_add.returncode == 0:
-                    # Then set trust policy explicitly
-                    cmd_trust = [
-                        "security", "add-trusted-cert",
-                        "-d",  # Add to admin cert store 
-                        "-r", "trustRoot",  # Trust for SSL
-                        "-k", user_keychain,
+                try:
+                    # Strategy 1: Try to add to system keychain with trust settings
+                    print("Attempting to install certificate to system keychain...")
+                    cmd_system = [
+                        "security", "add-trusted-cert", 
+                        "-d",  # Add to admin cert store
+                        "-r", "trustRoot",  # Set trust policy 
+                        "-k", "/Library/Keychains/System.keychain",
                         cert_path
                     ]
-                    result_trust = subprocess.run(cmd_trust, capture_output=True, text=True)
+                    result_system = subprocess.run(cmd_system, capture_output=True, text=True, timeout=30)
                     
-                    if result_trust.returncode == 0:
+                    if result_system.returncode == 0:
                         print(_('cert_installed_success'))
-                        print("✅ Certificate installed and trusted in login keychain")
+                        print("✅ Certificate installed to system keychain")
                         return True
                     else:
-                        print(f"Trust setting failed: {result_trust.stderr}")
-                else:
-                    print(f"Certificate add failed: {result_add.stderr}")
+                        error_msg = result_system.stderr.strip()
+                        print(f"⚠️ System keychain installation failed: {error_msg}")
+                        
+                        # Check for specific errors
+                        if "not permitted" in error_msg.lower() or "authorization" in error_msg.lower():
+                            print("💡 Tip: System keychain requires administrator privileges")
+                    
+                except subprocess.TimeoutExpired:
+                    print("⚠️ System keychain installation timed out")
+                except Exception as e:
+                    print(f"⚠️ System keychain installation error: {e}")
+                
+                # Strategy 2: Add to login keychain with explicit trust
+                try:
+                    print("Attempting to install certificate to login keychain...")
+                    user_keychain = os.path.expanduser("~/Library/Keychains/login.keychain-db")
+                    
+                    # First add the certificate
+                    cmd_add = ["security", "add-cert", "-k", user_keychain, cert_path]
+                    result_add = subprocess.run(cmd_add, capture_output=True, text=True, timeout=20)
+                    
+                    if result_add.returncode == 0 or "already exists" in result_add.stderr:
+                        # Then set trust policy explicitly
+                        cmd_trust = [
+                            "security", "add-trusted-cert",
+                            "-d",  # Add to admin cert store 
+                            "-r", "trustRoot",  # Trust for SSL
+                            "-k", user_keychain,
+                            cert_path
+                        ]
+                        result_trust = subprocess.run(cmd_trust, capture_output=True, text=True, timeout=20)
+                        
+                        if result_trust.returncode == 0:
+                            print(_('cert_installed_success'))
+                            print("✅ Certificate installed and trusted in login keychain")
+                            return True
+                        else:
+                            trust_error = result_trust.stderr.strip()
+                            print(f"⚠️ Trust setting failed: {trust_error}")
+                            
+                            if "already exists" in trust_error.lower():
+                                print("✅ Certificate may already be trusted")
+                                return True
+                    else:
+                        add_error = result_add.stderr.strip()
+                        print(f"⚠️ Certificate add failed: {add_error}")
+                        
+                except subprocess.TimeoutExpired:
+                    print("⚠️ Login keychain installation timed out")
+                except Exception as e:
+                    print(f"⚠️ Login keychain installation error: {e}")
                 
                 # Strategy 3: Manual approach with user guidance
-                print("Automatic installation failed. Manual installation required.")
+                print("🛠️ Automatic installation failed. Manual installation required.")
                 self._show_manual_certificate_instructions(cert_path)
                 return False
                 
             else:
                 # Linux: Multiple certificate installation strategies
-                print("Attempting certificate installation for Linux...")
+                print("🐧 Linux Certificate Installation")
                 
                 # Strategy 1: Try to install to system certificate store
                 success = False
+                installation_attempts = []
                 
-                # Ubuntu/Debian - copy to ca-certificates directory
                 try:
-                    # Convert to PEM format for Linux
-                    cert_pem_path = cert_path.replace('.cer', '.crt')
-                    
                     # Copy to user directory first
                     user_cert_dir = os.path.expanduser("~/.local/share/ca-certificates")
                     os.makedirs(user_cert_dir, exist_ok=True)
@@ -295,19 +364,28 @@ class CertificateManager:
                     user_cert_path = os.path.join(user_cert_dir, "mitmproxy-ca-cert.crt")
                     shutil.copy2(cert_path, user_cert_path)
                     
-                    print(f"Certificate copied to: {user_cert_path}")
+                    print(f"✅ Certificate copied to: {user_cert_path}")
+                    installation_attempts.append("User certificate directory")
                     
                     # Try to update system certificates (might require sudo)
                     try:
+                        print("Attempting system certificate store update...")
                         result = subprocess.run(["update-ca-certificates"], 
-                                               capture_output=True, text=True, timeout=10)
+                                               capture_output=True, text=True, timeout=15)
                         if result.returncode == 0:
                             print("✅ Certificate installed to system certificate store")
                             success = True
+                            installation_attempts.append("System certificate store")
                         else:
-                            print("⚠️ System certificate update failed (may need sudo)")
-                    except (FileNotFoundError, subprocess.TimeoutExpired):
-                        print("⚠️ update-ca-certificates not available")
+                            error_msg = result.stderr.strip()
+                            print(f"⚠️ System certificate update failed: {error_msg}")
+                            if "permission" in error_msg.lower():
+                                print("💡 Tip: System certificate update requires sudo privileges")
+                                
+                    except FileNotFoundError:
+                        print("⚠️ update-ca-certificates command not found (not Ubuntu/Debian?)")
+                    except subprocess.TimeoutExpired:
+                        print("⚠️ update-ca-certificates timed out")
                     
                     # Strategy 2: Install for browser certificate stores
                     if not success:
@@ -317,32 +395,48 @@ class CertificateManager:
                         nss_dir = os.path.expanduser("~/.pki/nssdb")
                         if os.path.exists(nss_dir):
                             try:
+                                print("Installing to NSS database (Firefox, Chrome)...")
                                 # Try using certutil for NSS databases (Firefox, Chrome on some distros)
                                 result_nss = subprocess.run([
                                     "certutil", "-A", "-n", "mitmproxy-ca", 
                                     "-t", "TC,C,T", "-i", cert_path, "-d", nss_dir
-                                ], capture_output=True, text=True, timeout=10)
+                                ], capture_output=True, text=True, timeout=15)
                                 
                                 if result_nss.returncode == 0:
                                     print("✅ Certificate installed to NSS database")
                                     success = True
+                                    installation_attempts.append("NSS database (browsers)")
                                 else:
-                                    print(f"⚠️ NSS certificate installation failed: {result_nss.stderr}")
+                                    nss_error = result_nss.stderr.strip()
+                                    print(f"⚠️ NSS certificate installation failed: {nss_error}")
+                                    if "already exists" in nss_error.lower():
+                                        print("✅ Certificate may already exist in NSS database")
+                                        success = True
+                                        installation_attempts.append("NSS database (existing)")
+                                        
                             except FileNotFoundError:
                                 print("⚠️ certutil not available for NSS installation")
+                                print("💡 Install with: sudo apt-get install libnss3-tools")
+                            except subprocess.TimeoutExpired:
+                                print("⚠️ NSS installation timed out")
+                        else:
+                            print("ℹ️ NSS database not found (~/.pki/nssdb)")
                     
                     if success:
-                        print("✅ Certificate installation completed")
+                        print("✅ Linux certificate installation completed")
+                        print(f"📝 Installed to: {', '.join(installation_attempts)}")
+                        print("🔄 Please restart your browser for changes to take effect")
                         return True
                     else:
                         print("⚠️ Automatic installation partially successful")
-                        print("Manual browser configuration may be required")
+                        print(f"📝 Attempted: {', '.join(installation_attempts)}")
+                        print("🛠️ Manual browser configuration may be required")
                         self._show_manual_certificate_instructions_linux(cert_path)
                         return True  # Consider partial success as success
                         
                 except Exception as e:
-                    print(f"Linux certificate installation error: {e}")
-                    print("Showing manual installation instructions...")
+                    print(f"⚠️ Linux certificate installation error: {e}")
+                    print("📝 Showing manual installation instructions...")
                     self._show_manual_certificate_instructions_linux(cert_path)
                     return True  # Consider showing instructions as success
 

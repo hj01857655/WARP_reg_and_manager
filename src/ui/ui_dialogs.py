@@ -11,6 +11,7 @@ from PyQt5.QtWidgets import (QDialog, QVBoxLayout, QHBoxLayout, QWidget, QPushBu
 from PyQt5.QtCore import Qt, QTimer
 from PyQt5.QtGui import QFont
 from src.config.languages import _
+from src.ui.theme_manager import theme_manager
 
 
 class AddAccountDialog(QDialog):
@@ -69,6 +70,7 @@ class AddAccountDialog(QDialog):
         # Title
         title_label = QLabel(_('manual_method_title'))
         title_label.setFont(QFont("Arial", 12, QFont.Bold))
+        title_label.setStyleSheet(f"color: {theme_manager.get_color('text_primary')}; background: transparent; border: none; outline: none; border-radius: 8px; padding: 6px 12px;")
         layout.addWidget(title_label)
 
         # Main layout (left-right)
@@ -82,6 +84,7 @@ class AddAccountDialog(QDialog):
         # Explanation
         instruction_label = QLabel(_('add_account_instruction'))
         instruction_label.setFont(QFont("Arial", 10))
+        instruction_label.setStyleSheet(f"color: {theme_manager.get_color('text_secondary')}; background: transparent; border: none; outline: none; border-radius: 6px; padding: 4px 8px;")
         left_panel.addWidget(instruction_label)
 
         # Text edit
@@ -120,6 +123,7 @@ class AddAccountDialog(QDialog):
         # Title
         title = QLabel(_('json_info_title'))
         title.setFont(QFont("Arial", 11, QFont.Bold))
+        title.setStyleSheet(f"color: {theme_manager.get_color('text_primary')}; background: transparent; border: none; outline: none; border-radius: 8px; padding: 6px 12px;")
         layout.addWidget(title)
 
         # Steps
@@ -136,6 +140,7 @@ class AddAccountDialog(QDialog):
         steps_label = QLabel(steps_text)
         steps_label.setWordWrap(True)
         steps_label.setProperty("class", "info-content")
+        steps_label.setStyleSheet(f"color: {theme_manager.get_color('text_primary')}; background: transparent; border: none; outline: none; border-radius: 6px; padding: 4px 8px;")
         layout.addWidget(steps_label)
 
         # JavaScript code (hidden, only copy button)

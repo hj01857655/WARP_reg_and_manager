@@ -11,47 +11,45 @@ from src.config.languages import _
 
 
 def load_stylesheet(app):
-    """Apply modern dark theme style"""
+    """Apply modern light theme style"""
     try:
-        base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-        dark_theme_path = os.path.join(base_dir, "ui", "dark_theme.qss")
+        # Import light theme from styles module
+        from src.ui.styles.light_theme import get_light_theme_stylesheet
         
-        if os.path.exists(dark_theme_path):
-            with open(dark_theme_path, "r", encoding="utf-8") as f:
-                app.setStyleSheet(f.read())
-            print("Dark theme loaded successfully")
-        else:
-            # Fallback inline dark theme if file doesn't exist
-            app.setStyleSheet("""
-                QMainWindow {
-                    background-color: #1e1e2e;
-                    color: #cdd6f4;
-                }
-                QWidget {
-                    background-color: #1e1e2e;
-                    color: #cdd6f4;
-                }
-                QPushButton {
-                    background-color: #313244;
-                    color: #cdd6f4;
-                    border: 1px solid #45475a;
-                    border-radius: 6px;
-                    padding: 8px 16px;
-                    font-weight: bold;
-                    font-size: 11px;
-                }
-                QPushButton:hover {
-                    background-color: #45475a;
-                }
-                QTableWidget {
-                    background-color: #181825;
-                    color: #cdd6f4;
-                    border: 1px solid #45475a;
-                }
-            """)
-            print("Fallback dark theme loaded")
+        # Apply light theme stylesheet
+        app.setStyleSheet(get_light_theme_stylesheet())
+        print("Light theme loaded successfully")
+        
     except Exception as e:
-        print(f"Dark theme load error: {e}")
+        print(f"Light theme load error: {e}")
+        # Fallback to basic light theme
+        app.setStyleSheet("""
+            QMainWindow {
+                background-color: #ffffff;
+                color: #1a1a1a;
+            }
+            QWidget {
+                background-color: #ffffff;
+                color: #1a1a1a;
+            }
+            QPushButton {
+                background-color: #007AFF;
+                color: white;
+                border: none;
+                border-radius: 6px;
+                padding: 8px 16px;
+                font-weight: 500;
+            }
+            QPushButton:hover {
+                background-color: #0051D5;
+            }
+            QTableWidget {
+                background-color: #ffffff;
+                color: #1a1a1a;
+                border: 1px solid #e0e0e0;
+            }
+        """)
+        print("Fallback light theme loaded")
 
 
 def is_port_open(host, port):

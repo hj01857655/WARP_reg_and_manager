@@ -29,6 +29,8 @@ from src.ui.ui_dialogs import AddAccountDialog
 from src.ui.sidebar_widget import SidebarWidget
 from src.ui.home_page import HomePage
 from src.ui.about_page import AboutPage
+from src.ui.cleanup_page import CleanupPage
+from src.ui.account_card_page import AccountCardPage
 from src.utils.utils import load_stylesheet, get_os_info, is_port_open
 from src.utils.account_processor import AccountProcessor
 
@@ -556,7 +558,8 @@ class MainWindow(QMainWindow):
         self._check_and_cleanup_startup_state()
 
         self.init_ui()
-        self.load_accounts()
+        # Don't load accounts here as we're using card-based UI now
+        # self.load_accounts()
 
         # Timer for checking proxy status
         self.proxy_timer = QTimer()
@@ -748,8 +751,8 @@ class MainWindow(QMainWindow):
 
     def init_ui(self):
         self.setWindowTitle(_('app_title'))
-        self.setMinimumSize(1300, 800)  # Larger window for sidebar + content
-        self.resize(1400, 900)  # Default size
+        self.setMinimumSize(1400, 800)  # 增加最小尺寸
+        self.resize(1600, 900)  # 增加默认尺寸，让界面更大气
 
         # Add status bar
         self.status_bar = QStatusBar()
@@ -776,11 +779,16 @@ class MainWindow(QMainWindow):
         main_layout = QHBoxLayout()
         main_layout.setContentsMargins(0, 0, 0, 0)
         main_layout.setSpacing(0)
+        
+        # Create splitter for resizable panels
+        self.main_splitter = QSplitter(Qt.Horizontal)
+        self.main_splitter.setChildrenCollapsible(False)
 
         # Create sidebar
         self.sidebar = SidebarWidget()
         self.sidebar.menu_selected.connect(self.on_page_changed)
-        main_layout.addWidget(self.sidebar)
+        self.sidebar.sidebar_toggled.connect(self.on_sidebar_toggled)
+        self.main_splitter.addWidget(self.sidebar)
 
         # Create stacked widget for pages
         self.stacked_widget = QStackedWidget()
@@ -788,7 +796,14 @@ class MainWindow(QMainWindow):
         # Create pages
         self.create_pages()
         
-        main_layout.addWidget(self.stacked_widget)
+        self.main_splitter.addWidget(self.stacked_widget)
+        
+        # Set splitter sizes (sidebar: 300px, content: rest)
+        self.main_splitter.setSizes([300, 1300])  # 调整为300px的侧边栏宽度
+        self.main_splitter.setStretchFactor(0, 0)  # Sidebar doesn't stretch
+        self.main_splitter.setStretchFactor(1, 1)  # Content stretches
+        
+        main_layout.addWidget(self.main_splitter)
         central_widget.setLayout(main_layout)
         
         # Apply modern stylesheet
@@ -801,11 +816,15 @@ class MainWindow(QMainWindow):
         self.home_page.quick_action_requested.connect(self.handle_quick_action)
         self.stacked_widget.addWidget(self.home_page)
         
-        # Page 1: Accounts (original interface)
-        self.accounts_page = self.create_accounts_page()
+        # Page 1: Accounts (new card-based interface)
+        self.accounts_page = AccountCardPage(self.account_manager)
         self.stacked_widget.addWidget(self.accounts_page)
         
-        # Page 2: About
+        # Page 2: Cleanup
+        self.cleanup_page = CleanupPage()
+        self.stacked_widget.addWidget(self.cleanup_page)
+        
+        # Page 3: About
         self.about_page = AboutPage()
         self.stacked_widget.addWidget(self.about_page)
         
@@ -820,6 +839,15 @@ class MainWindow(QMainWindow):
         if index == 0 and hasattr(self, 'home_page'):
             self.home_page.update_stats()
             self.home_page.update_proxy_status(self.proxy_enabled)
+    
+    def on_sidebar_toggled(self, is_expanded):
+        """Handle sidebar toggle to adjust main splitter sizes"""
+        if is_expanded:
+            # Sidebar expanded: give it 300px
+            self.main_splitter.setSizes([300, 1300])
+        else:
+            # Sidebar collapsed: give it 70px
+            self.main_splitter.setSizes([70, 1530])
     
     def handle_quick_action(self, action):
         """Handle quick actions from home page"""
@@ -852,15 +880,16 @@ class MainWindow(QMainWindow):
         self.search_input.setPlaceholderText(_('search_placeholder'))
         self.search_input.setStyleSheet("""
             QLineEdit {
-                background-color: #2a2b37;
-                color: #e0e0e0;
-                border: 1px solid #3a3b47;
-                border-radius: 4px;
+                background-color: #ffffff;
+                color: #374151;
+                border: 1px solid #d1d5db;
+                border-radius: 10px;
                 padding: 8px 12px;
                 font-size: 14px;
             }
             QLineEdit:focus {
-                border-color: #5a6090;
+                border-color: #3b82f6;
+                border-radius: 10px;
             }
         """)
         self.search_input.textChanged.connect(self.load_accounts)
@@ -869,33 +898,83 @@ class MainWindow(QMainWindow):
         # 语言选择下拉框
         self.language_combo = QComboBox()
         self.language_combo.addItems(["🇺🇸 English", "🇨🇳 中文"])
+        self.language_combo.setFixedHeight(36)
+        self.language_combo.setFixedWidth(140)
+        self.language_combo.setCursor(Qt.PointingHandCursor)
         self.language_combo.setStyleSheet("""
             QComboBox {
-                background-color: #2a2b37;
-                color: #e0e0e0;
-                border: 1px solid #3a3b47;
-                border-radius: 4px;
-                padding: 8px;
+                background: qlineargradient(
+                    x1: 0, y1: 0, x2: 0, y2: 1,
+                    stop: 0 #ffffff,
+                    stop: 1 #f8fafc
+                );
+                color: #374151;
+                border: 1px solid #d1d5db;
+                border-radius: 8px;
+                padding: 8px 35px 8px 12px;
                 font-size: 14px;
-                min-width: 120px;
+                font-weight: 600;
+                min-width: 140px;
+            }
+            QComboBox:hover {
+                background: qlineargradient(
+                    x1: 0, y1: 0, x2: 0, y2: 1,
+                    stop: 0 #f8fafc,
+                    stop: 1 #f1f5f9
+                );
+                border: 1px solid #3b82f6;
+            }
+            QComboBox:pressed {
+                background: qlineargradient(
+                    x1: 0, y1: 0, x2: 0, y2: 1,
+                    stop: 0 #f1f5f9,
+                    stop: 1 #e2e8f0
+                );
             }
             QComboBox::drop-down {
-                border: none;
+                subcontrol-origin: padding;
+                subcontrol-position: top right;
+                width: 30px;
+                border-left: 1px solid #d1d5db;
+                border-top-right-radius: 8px;
+                border-bottom-right-radius: 8px;
+                background: transparent;
             }
             QComboBox::down-arrow {
                 image: none;
-                border-left: 5px solid transparent;
-                border-right: 5px solid transparent;
-                border-top: 5px solid #e0e0e0;
                 width: 0;
                 height: 0;
-                margin-right: 5px;
+                border-left: 6px solid transparent;
+                border-right: 6px solid transparent;
+                border-top: 8px solid #3b82f6;
+                margin-right: 8px;
+            }
+            QComboBox:hover::down-arrow {
+                border-top: 8px solid #2563eb;
             }
             QComboBox QAbstractItemView {
-                background-color: #2a2b37;
-                color: #e0e0e0;
-                selection-background-color: #3d415a;
-                border: 1px solid #3a3b47;
+                background-color: #ffffff;
+                color: #374151;
+                border: 1px solid #d1d5db;
+                border-radius: 8px;
+                selection-background-color: #e0e7ff;
+                selection-color: #3b82f6;
+                padding: 4px;
+                outline: none;
+            }
+            QComboBox QAbstractItemView::item {
+                height: 35px;
+                padding: 8px;
+                border-radius: 4px;
+                margin: 2px;
+            }
+            QComboBox QAbstractItemView::item:hover {
+                background-color: #f1f5f9;
+                color: #374151;
+            }
+            QComboBox QAbstractItemView::item:selected {
+                background-color: #3b82f6;
+                color: #ffffff;
             }
         """)
         # 设置默认选中的语言
@@ -976,10 +1055,27 @@ class MainWindow(QMainWindow):
         # Batch operation buttons
         button_layout.addWidget(self.delete_banned_button)
         button_layout.addWidget(self.refresh_tokens_button)
+        
+        # Separator
+        separator2 = QFrame()
+        separator2.setFrameShape(QFrame.VLine)
+        separator2.setFrameShadow(QFrame.Sunken)
+        separator2.setMaximumHeight(30)
+        separator2.setStyleSheet("QFrame { color: #4a5568; }")
+        button_layout.addWidget(separator2)
+        
+        # Import/Export buttons
+        self.import_export_button = QPushButton(_('import_export'))
+        self.import_export_button.setObjectName("ImportExportButton")
+        self.import_export_button.setMinimumHeight(36)
+        self.import_export_button.setToolTip(_('import_export_tooltip'))
+        self.import_export_button.clicked.connect(self.show_import_export_dialog)
+        button_layout.addWidget(self.import_export_button)
+        
         button_layout.addStretch()
 
         # Help button on the right
-        self.help_button = QPushButton('Help')
+        self.help_button = QPushButton(_('help'))
         self.help_button.setFixedHeight(36)
         self.help_button.setToolTip(_('help_tooltip'))
         self.help_button.clicked.connect(self.show_help_dialog)
@@ -1040,110 +1136,193 @@ class MainWindow(QMainWindow):
         return page
     
     def get_modern_stylesheet(self):
-        """Return modern stylesheet for the application"""
+        """Return modern light and fresh stylesheet for the application"""
         return """
-        /* Main window */
+        /* Main window - Light and fresh theme - 圆角 */
         QMainWindow {
-            background-color: #1e1f29;
-            color: #e0e0e0;
+            background-color: #ffffff;
+            color: #1e293b;
+            border-radius: 15px;
         }
         
-        /* Central widget */
+        /* Central widget - 移除所有外框 - 圆角 */
         QWidget {
-            background-color: #1e1f29;
-            color: #e0e0e0;
+            background-color: #ffffff;
+            color: #1e293b;
+            border: none;
+            outline: none;
+            border-radius: 10px;
         }
         
-        /* Modern button styles */
+        /* 全局移除所有外框和轮廓 */
+        * {
+            outline: none;
+        }
+        
+        /* 所有QFrame都要圆角 */
+        QFrame {
+            border-radius: 12px;
+        }
+        
+        /* 所有输入框和文本框都要圆角 */
+        QLineEdit, QTextEdit, QPlainTextEdit, QListWidget, QListView, QTreeView {
+            border-radius: 10px;
+        }
+        
+        /* 下拉框也要圆角 */
+        QComboBox {
+            border-radius: 10px;
+        }
+        
+        /* 按钮必须圆角 */
+        QPushButton {
+            border-radius: 10px !important;
+        }
+        
+        /* 默认QLabel样式 - 不添加边框和背景 */
+        QLabel {
+            background: transparent;
+            border: none;
+            padding: 2px;
+            margin: 0;
+        }
+        
+        /* 只为特定的数据字段标签添加圆角背景 */
+        QLabel[class="field"] {
+            background: rgba(240, 240, 240, 0.5);
+            border: 1px solid rgba(200, 200, 200, 0.3);
+            border-radius: 10px;
+            padding: 8px 12px;
+            margin: 2px;
+        }
+        
+        /* 卡片内的信息标签圆角样式 */
+        QFrame QLabel[class="info"] {
+            background: rgba(250, 250, 250, 0.6);
+            border: 1px solid rgba(220, 220, 220, 0.4);
+            border-radius: 8px;
+            padding: 6px 10px;
+        }
+        
+        /* 特殊标签类型 - 不需要背景和边框 */
+        QLabel#title, QLabel#icon, QLabel#time {
+            background: transparent !important;
+            border: none !important;
+            padding: 0 !important;
+            margin: 0 !important;
+        }
+        
+        /* 特别处理下拉框 */
+        QComboBox {
+            outline: none;
+        }
+        
+        QComboBox:focus {
+            outline: none;
+        }
+        
+        /* Modern button styles - Light theme - 移除黑色外框 */
         QPushButton {
             background-color: qlineargradient(x1:0, y1:0, x2:0, y2:1, 
-                stop:0 #4a5568, stop:1 #2d3748);
-            color: #ffffff;
-            border: 1px solid #2d3748;
+                stop:0 #f8fafc, stop:1 #e2e8f0);
+            color: #475569;
+            border: 1px solid #cbd5e1;
             border-radius: 6px;
             padding: 8px 16px;
             font-size: 13px;
             font-weight: bold;
             min-width: 80px;
+            outline: none;
+        }
+        
+        QPushButton:focus {
+            border: 1px solid #3b82f6;
+            outline: none;
         }
         
         QPushButton:hover {
             background-color: qlineargradient(x1:0, y1:0, x2:0, y2:1, 
-                stop:0 #5a6c7d, stop:1 #3d4852);
-            border-color: #4a5568;
+                stop:0 #f1f5f9, stop:1 #e2e8f0);
+            border-color: #94a3b8;
+            color: #334155;
         }
         
         QPushButton:pressed {
             background-color: qlineargradient(x1:0, y1:0, x2:0, y2:1, 
-                stop:0 #2d3748, stop:1 #1a202c);
+                stop:0 #e2e8f0, stop:1 #cbd5e1);
         }
         
         QPushButton:disabled {
-            background-color: #2d3748;
-            color: #666;
-            border-color: #2d3748;
+            background-color: #f1f5f9;
+            color: #94a3b8;
+            border-color: #e2e8f0;
         }
         
-        /* Specific button styles */
+        /* Specific button styles - Light theme */
         QPushButton#StartButton {
             background-color: qlineargradient(x1:0, y1:0, x2:0, y2:1, 
-                stop:0 #38a169, stop:1 #2f855a);
+                stop:0 #10b981, stop:1 #059669);
+            color: white;
         }
         
         QPushButton#StartButton:hover {
             background-color: qlineargradient(x1:0, y1:0, x2:0, y2:1, 
-                stop:0 #48bb78, stop:1 #38a169);
+                stop:0 #34d399, stop:1 #10b981);
         }
         
         QPushButton#StopButton {
             background-color: qlineargradient(x1:0, y1:0, x2:0, y2:1, 
-                stop:0 #e53e3e, stop:1 #c53030);
+                stop:0 #ef4444, stop:1 #dc2626);
+            color: white;
         }
         
         QPushButton#StopButton:hover {
             background-color: qlineargradient(x1:0, y1:0, x2:0, y2:1, 
-                stop:0 #f56565, stop:1 #e53e3e);
+                stop:0 #f87171, stop:1 #ef4444);
         }
         
         QPushButton#AddButton, QPushButton#CreateAccountButton {
             background-color: qlineargradient(x1:0, y1:0, x2:0, y2:1, 
-                stop:0 #4299e1, stop:1 #2b77cb);
+                stop:0 #3b82f6, stop:1 #2563eb);
+            color: white;
         }
         
         QPushButton#AddButton:hover, QPushButton#CreateAccountButton:hover {
             background-color: qlineargradient(x1:0, y1:0, x2:0, y2:1, 
-                stop:0 #63b3ed, stop:1 #4299e1);
+                stop:0 #60a5fa, stop:1 #3b82f6);
         }
         
         QPushButton#RefreshButton {
             background-color: qlineargradient(x1:0, y1:0, x2:0, y2:1, 
-                stop:0 #ed8936, stop:1 #c05621);
+                stop:0 #f59e0b, stop:1 #d97706);
+            color: white;
         }
         
         QPushButton#RefreshButton:hover {
             background-color: qlineargradient(x1:0, y1:0, x2:0, y2:1, 
-                stop:0 #f6ad55, stop:1 #ed8936);
+                stop:0 #fbbf24, stop:1 #f59e0b);
         }
         
         QPushButton#DeleteButton {
             background-color: qlineargradient(x1:0, y1:0, x2:0, y2:1, 
-                stop:0 #e53e3e, stop:1 #c53030);
+                stop:0 #ef4444, stop:1 #dc2626);
+            color: white;
         }
         
         QPushButton#DeleteButton:hover {
             background-color: qlineargradient(x1:0, y1:0, x2:0, y2:1, 
-                stop:0 #f56565, stop:1 #e53e3e);
+                stop:0 #f87171, stop:1 #ef4444);
         }
         
-        /* Table styles */
+        /* Table styles - Light theme - 圆角 */
         QTableWidget {
-            background-color: #2a2b37;
-            alternate-background-color: #2f3041;
-            color: #e0e0e0;
-            selection-background-color: #4a5568;
-            selection-color: #ffffff;
-            border: 1px solid #3a3b47;
-            border-radius: 4px;
+            background-color: #ffffff;
+            alternate-background-color: #f8fafc;
+            color: #1e293b;
+            selection-background-color: #e0e7ff;
+            selection-color: #1e293b;
+            border: 1px solid #e2e8f0;
+            border-radius: 12px;
         }
         
         QTableWidget::item {
@@ -1152,88 +1331,90 @@ class MainWindow(QMainWindow):
         }
         
         QTableWidget::item:selected {
-            background-color: #4a5568;
+            background-color: #e0e7ff;
         }
         
-        /* Header styles */
+        /* Header styles - Light theme */
         QHeaderView::section {
-            background-color: #3a3b47;
-            color: #ffffff;
+            background-color: #f8fafc;
+            color: #374151;
             padding: 10px;
             border: none;
-            border-right: 1px solid #4a4b57;
+            border-right: 1px solid #e5e7eb;
             font-weight: bold;
         }
         
         QHeaderView::section:hover {
-            background-color: #4a4b57;
+            background-color: #f1f5f9;
         }
         
-        /* Scrollbar styles */
+        /* Scrollbar styles - Light theme */
         QScrollBar:vertical {
-            background-color: #2a2b37;
+            background-color: #f8fafc;
             width: 12px;
             border-radius: 6px;
         }
         
         QScrollBar::handle:vertical {
-            background-color: #4a5568;
+            background-color: #cbd5e1;
             border-radius: 6px;
             min-height: 20px;
         }
         
         QScrollBar::handle:vertical:hover {
-            background-color: #5a6c7d;
+            background-color: #94a3b8;
         }
         
-        /* Status bar */
+        /* Status bar - Light theme - 圆角 */
         QStatusBar {
-            background-color: #2d3748;
-            color: #e0e0e0;
-            border-top: 1px solid #4a5568;
+            background-color: #f8fafc;
+            color: #374151;
+            border-top: 1px solid #e5e7eb;
+            border-radius: 10px;
+            margin: 5px;
         }
         
-        /* Action buttons in table */
+        /* Action buttons in table - Light theme */
         QPushButton[state="start"] {
-            background-color: #38a169;
+            background-color: #10b981;
             color: white;
-            border: 1px solid #2f855a;
+            border: 1px solid #059669;
         }
         
         QPushButton[state="start"]:hover {
-            background-color: #48bb78;
+            background-color: #34d399;
         }
         
         QPushButton[state="stop"] {
-            background-color: #e53e3e;
+            background-color: #ef4444;
             color: white;
-            border: 1px solid #c53030;
+            border: 1px solid #dc2626;
         }
         
         QPushButton[state="stop"]:hover {
-            background-color: #f56565;
+            background-color: #f87171;
         }
         
         QPushButton[state="banned"] {
-            background-color: #4a5568;
-            color: #a0a0a0;
-            border: 1px solid #2d3748;
+            background-color: #f1f5f9;
+            color: #6b7280;
+            border: 1px solid #d1d5db;
         }
         
-        /* Row highlighting for different states */
+        /* Row highlighting for different states - Light theme */
         QTableWidget::item[data="active"] {
-            background-color: #2f5233;
-            color: #68d391;
+            background-color: #ecfdf5;
+            color: #059669;
         }
         
         QTableWidget::item[data="banned"] {
-            background-color: #4a2d2d;
-            color: #fc8181;
+            background-color: #fef2f2;
+            color: #dc2626;
         }
         
         QTableWidget::item[data="unhealthy"] {
-            background-color: #4a3d2d;
-            color: #f6ad55;
+            background-color: #fffbeb;
+            color: #d97706;
         }
         """
     
@@ -3345,6 +3526,15 @@ class MainWindow(QMainWindow):
         else:
             self.show_status_message("语言切换为中文", 2000)
 
+    def show_import_export_dialog(self):
+        """Show import/export dialog"""
+        from src.ui.import_export_dialog import ImportExportDialog
+        
+        dialog = ImportExportDialog(self.account_manager, self)
+        if dialog.exec_():
+            # Reload accounts if import was successful
+            self.load_accounts()
+    
     def show_help_dialog(self):
         """显示联系我们的对话框"""
         from PyQt5.QtWidgets import QDialog, QVBoxLayout, QLabel, QHBoxLayout, QPushButton, QTextEdit
@@ -3501,6 +3691,10 @@ class MainWindow(QMainWindow):
         if hasattr(self, 'refresh_tokens_button'):
             self.refresh_tokens_button.setText(_('refresh_tokens'))
             self.refresh_tokens_button.setToolTip(_('refresh_tokens_confirm'))
+        
+        if hasattr(self, 'import_export_button'):
+            self.import_export_button.setText(_('import_export'))
+            self.import_export_button.setToolTip(_('import_export_tooltip'))
             
         self.help_button.setText(_('help'))
         self.help_button.setToolTip(_('help_tooltip'))
@@ -3508,6 +3702,14 @@ class MainWindow(QMainWindow):
         # Refresh sidebar texts
         if hasattr(self, 'sidebar'):
             self.sidebar.refresh_ui_texts()
+        
+        # Refresh home page texts
+        if hasattr(self, 'home_page'):
+            self.home_page.refresh_ui_texts()
+        
+        # Refresh cleanup page texts
+        if hasattr(self, 'cleanup_page'):
+            self.cleanup_page.refresh_ui_texts()
         
         # Refresh about page texts
         if hasattr(self, 'about_page'):

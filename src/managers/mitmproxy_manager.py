@@ -79,46 +79,66 @@ class MitmProxyManager:
                 else:
                     print(_('cert_created_success'))
 
-            # Automatic certificate installation
+            # Intelligent certificate management
             if parent_window and not parent_window.account_manager.is_certificate_approved():
-                print(_('cert_installing'))
-
-                # Install certificate automatically
-                if self.cert_manager.install_certificate_automatically():
-                    # If certificate successfully installed, save approval
-                    parent_window.account_manager.set_certificate_approved(True)
-                    parent_window.status_bar.showMessage(_('cert_installed_success'), 3000)
-
-                    # Windows: warn if installed only for CurrentUser
-                    if sys.platform == "win32":
-                        try:
-                            in_machine = self.cert_manager._is_cert_installed_in_store_windows("machine")
-                            in_user = self.cert_manager._is_cert_installed_in_store_windows("user")
-                            if in_user and not in_machine:
-                                QMessageBox.warning(
-                                    parent_window,
-                                    "Certificate scope warning",
-                                    "mitmproxy CA установлен только в CurrentUser\\Root.\n\n"
-                                    "Для лучшей совместимости запустите приложение от имени администратора, "
-                                    "чтобы установить сертификат в LocalMachine\\Root.",
-                                    QMessageBox.Ok
-                                )
-                        except Exception:
-                            pass
+                print("🔍 Checking certificate installation status...")
+                
+                # First check if certificate is already properly installed
+                cert_already_installed = False
+                
+                if sys.platform == "win32":
+                    # Check both machine and user stores
+                    in_machine = self.cert_manager._is_cert_installed_in_store_windows("machine")
+                    in_user = self.cert_manager._is_cert_installed_in_store_windows("user")
                     
-                    # On macOS additionally check certificate trust
-                    if sys.platform == "darwin":
-                        if not self.cert_manager.verify_certificate_trust_macos():
-                            print("⚠️ Certificate may not be fully trusted. Manual verification recommended.")
-                            parent_window.status_bar.showMessage("Certificate installed but may need manual trust setup", 5000)
+                    if in_machine:
+                        print("✅ Certificate already installed in LocalMachine\\Root (system-wide)")
+                        cert_already_installed = True
+                    elif in_user:
+                        print("✅ Certificate already installed in CurrentUser\\Root")
+                        print("💡 Tip: Run as Administrator for system-wide installation")
+                        cert_already_installed = True
+                        
+                elif sys.platform == "darwin":
+                    # Check macOS keychain
+                    if self.cert_manager.verify_certificate_trust_macos():
+                        print("✅ Certificate already trusted in macOS keychain")
+                        cert_already_installed = True
+                        
                 else:
-                    # Automatic installation failed - show manual installation dialog
-                    dialog_result = self.show_manual_certificate_dialog(parent_window)
-                    if dialog_result:
-                        # User said installation completed
+                    # Linux - assume installed if certificate file exists
+                    if self.cert_manager.check_certificate_exists():
+                        print("✅ Certificate file exists (Linux)")
+                        cert_already_installed = True
+                
+                if cert_already_installed:
+                    # Mark as approved to avoid repeated checks
+                    parent_window.account_manager.set_certificate_approved(True)
+                    if parent_window:
+                        parent_window.status_bar.showMessage("Certificate already installed", 2000)
+                else:
+                    # Proceed with installation
+                    print(_('cert_installing'))
+                    
+                    if self.cert_manager.install_certificate_automatically():
+                        # Installation successful
                         parent_window.account_manager.set_certificate_approved(True)
+                        parent_window.status_bar.showMessage(_('cert_installed_success'), 3000)
+                        
+                        # Platform-specific post-installation checks
+                        if sys.platform == "win32":
+                            self._check_windows_cert_scope(parent_window)
+                        elif sys.platform == "darwin":
+                            self._check_macos_cert_trust(parent_window)
                     else:
-                        return False
+                        # Automatic installation failed - show manual installation dialog
+                        print("🛠️ Automatic installation failed, showing manual instructions...")
+                        dialog_result = self.show_manual_certificate_dialog(parent_window)
+                        if dialog_result:
+                            parent_window.account_manager.set_certificate_approved(True)
+                        else:
+                            print("❌ Certificate installation cancelled by user")
+                            return False
 
             # Mitmproxy command exactly like old version
             cmd = [
@@ -502,6 +522,38 @@ class MitmProxyManager:
         print("3. Firefox: Uses its own certificate store - may need separate installation")
         
         return True
+
+    def _check_windows_cert_scope(self, parent_window):
+        """Check and warn about Windows certificate installation scope"""
+        try:
+            in_machine = self.cert_manager._is_cert_installed_in_store_windows("machine")
+            in_user = self.cert_manager._is_cert_installed_in_store_windows("user")
+            
+            if in_user and not in_machine:
+                # Show friendly reminder instead of warning dialog
+                print("ℹ️ Certificate installed in CurrentUser store")
+                print("💡 For best compatibility across all applications, consider running as Administrator")
+                if parent_window:
+                    parent_window.status_bar.showMessage(
+                        "Certificate installed for current user. Run as Admin for system-wide installation.", 
+                        5000
+                    )
+        except Exception as e:
+            print(f"Certificate scope check error: {e}")
+    
+    def _check_macos_cert_trust(self, parent_window):
+        """Check macOS certificate trust status"""
+        try:
+            if not self.cert_manager.verify_certificate_trust_macos():
+                print("⚠️ Certificate may not be fully trusted on macOS")
+                print("💡 You may need to manually approve the certificate in Keychain Access")
+                if parent_window:
+                    parent_window.status_bar.showMessage(
+                        "Certificate installed but may need manual trust setup", 
+                        5000
+                    )
+        except Exception as e:
+            print(f"macOS certificate trust check error: {e}")
 
     def show_manual_certificate_dialog(self, parent_window):
         """Show manual certificate installation dialog"""
