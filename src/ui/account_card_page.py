@@ -10,7 +10,8 @@ from PyQt5.QtWidgets import (
     QFrame, QScrollArea, QGridLayout, QGroupBox, QLineEdit,
     QMessageBox, QProgressBar, QTableWidget, QTableWidgetItem,
     QHeaderView, QStackedWidget, QButtonGroup, QCheckBox,
-    QComboBox, QMenu, QAction
+    QComboBox, QMenu, QAction, QFileDialog, QDialog,
+    QDialogButtonBox, QFormLayout, QSpinBox
 )
 from PyQt5.QtCore import Qt, QTimer, pyqtSignal, QThread
 from PyQt5.QtGui import QFont, QPalette, QColor
@@ -381,6 +382,8 @@ class AccountCardPage(QWidget):
         super().__init__(parent)
         self.account_manager = account_manager
         self.cards = []  # 保留cards属性以支持卡片视图（如果需要）
+        self.search_text = ""  # 搜索文本
+        self.selected_accounts = set()  # 选中的账户ID
         self.init_ui()
         self.load_accounts()
     
@@ -483,7 +486,62 @@ class AccountCardPage(QWidget):
         batch_delete_btn.clicked.connect(self.batch_delete)
         layout.addWidget(batch_delete_btn)
         
-        layout.addStretch()  # 右边留空
+        # 导入导出按钮
+        import_btn = QPushButton("📥 导入")
+        import_btn.setStyleSheet(theme_manager.get_button_style('secondary'))
+        import_btn.clicked.connect(self.import_accounts)
+        layout.addWidget(import_btn)
+        
+        export_btn = QPushButton("📤 导出")
+        export_btn.setStyleSheet(theme_manager.get_button_style('secondary'))
+        export_btn.clicked.connect(self.export_accounts)
+        layout.addWidget(export_btn)
+        
+        # 分隔线
+        separator = QFrame()
+        separator.setFrameShape(QFrame.VLine)
+        separator.setStyleSheet("background-color: #dee2e6; margin: 0 10px;")
+        layout.addWidget(separator)
+        
+        # 批量操作菜单
+        batch_menu_btn = QPushButton("⚡ 批量操作")
+        batch_menu_btn.setStyleSheet(theme_manager.get_button_style('warning'))
+        batch_menu = QMenu()
+        batch_menu.addAction("✅ 激活选中", self.batch_activate)
+        batch_menu.addAction("⏸️ 暂停选中", self.batch_pause)
+        batch_menu.addAction("🔄 刷新选中", self.batch_refresh_selected)
+        batch_menu.addAction("📋 复制选中邮箱", self.copy_selected_emails)
+        batch_menu_btn.setMenu(batch_menu)
+        layout.addWidget(batch_menu_btn)
+        
+        layout.addStretch()
+        
+        # 搜索框
+        self.search_input = QLineEdit()
+        self.search_input.setPlaceholderText("🔍 搜索账号...")
+        self.search_input.setStyleSheet("""
+            QLineEdit {
+                background-color: white;
+                border: 1px solid #ced4da;
+                border-radius: 6px;
+                padding: 8px 12px;
+                font-size: 14px;
+                min-width: 250px;
+            }
+            QLineEdit:focus {
+                border-color: #007AFF;
+                outline: none;
+            }
+        """)
+        self.search_input.textChanged.connect(self.on_search_text_changed)
+        layout.addWidget(self.search_input)
+        
+        # 高级筛选按钮
+        filter_btn = QPushButton("⚙️")
+        filter_btn.setToolTip("高级筛选")
+        filter_btn.setStyleSheet(theme_manager.get_button_style('primary'))
+        filter_btn.clicked.connect(self.show_advanced_filter)
+        layout.addWidget(filter_btn)
         
         header.setLayout(layout)
         return header
@@ -577,6 +635,14 @@ class AccountCardPage(QWidget):
             return
         
         accounts = self.account_manager.get_accounts_with_health_and_limits()
+        
+        # 应用搜索过滤
+        if hasattr(self, 'search_text') and self.search_text:
+            accounts = self.filter_accounts(accounts, self.search_text)
+        
+        # 应用排序
+        accounts = self.sort_accounts(accounts)
+        
         self.table_widget.setRowCount(len(accounts))
         
         # 在表头第一列显示全选复选框
@@ -849,3 +915,267 @@ class AccountCardPage(QWidget):
         """刷新UI文本当语言变化时"""
         # 重新加载页面以更新所有文本
         self.load_accounts()
+    
+    def on_search_text_changed(self, text):
+        """搜索文本变化时触发"""
+        self.search_text = text.lower()
+        self.update_table_view()
+    
+    def filter_accounts(self, accounts, search_text):
+        """根据搜索文本过滤账户"""
+        if not search_text:
+            return accounts
+        
+        filtered = []
+        for account in accounts:
+            # 搜索邮箱、用户ID、状态等
+            if (search_text in account.get('email', '').lower() or
+                search_text in account.get('user_id', '').lower() or
+                search_text in account.get('status', '').lower() or
+                search_text in str(account.get('usage', '')).lower()):
+                filtered.append(account)
+        return filtered
+    
+    def sort_accounts(self, accounts):
+        """对账户进行排序"""
+        # 默认按邮箱排序
+        return sorted(accounts, key=lambda x: x.get('email', ''))
+    
+    def import_accounts(self):
+        """导入账户"""
+        file_path, _ = QFileDialog.getOpenFileName(
+            self, '导入账户', '', 'JSON Files (*.json);;CSV Files (*.csv);;All Files (*)'
+        )
+        
+        if file_path:
+            try:
+                import json
+                import csv
+                
+                accounts_to_import = []
+                
+                if file_path.endswith('.json'):
+                    with open(file_path, 'r', encoding='utf-8') as f:
+                        data = json.load(f)
+                        if isinstance(data, list):
+                            accounts_to_import = data
+                        elif isinstance(data, dict) and 'accounts' in data:
+                            accounts_to_import = data['accounts']
+                
+                elif file_path.endswith('.csv'):
+                    with open(file_path, 'r', encoding='utf-8') as f:
+                        reader = csv.DictReader(f)
+                        accounts_to_import = list(reader)
+                
+                # 导入账户
+                imported_count = 0
+                for account_data in accounts_to_import:
+                    try:
+                        if self.account_manager:
+                            self.account_manager.add_account(account_data)
+                            imported_count += 1
+                    except Exception as e:
+                        print(f'导入账户失败: {e}')
+                
+                self.load_accounts()
+                QMessageBox.information(self, '成功', f'成功导入 {imported_count} 个账户')
+            
+            except Exception as e:
+                QMessageBox.warning(self, '错误', f'导入失败: {str(e)}')
+    
+    def export_accounts(self):
+        """导出账户"""
+        file_path, _ = QFileDialog.getSaveFileName(
+            self, '导出账户', 'warp_accounts.json', 'JSON Files (*.json);;CSV Files (*.csv)'
+        )
+        
+        if file_path:
+            try:
+                accounts = self.account_manager.get_accounts_with_health_and_limits() if self.account_manager else []
+                
+                if file_path.endswith('.json'):
+                    import json
+                    with open(file_path, 'w', encoding='utf-8') as f:
+                        json.dump({'accounts': accounts}, f, ensure_ascii=False, indent=2)
+                
+                elif file_path.endswith('.csv'):
+                    import csv
+                    if accounts:
+                        with open(file_path, 'w', encoding='utf-8', newline='') as f:
+                            writer = csv.DictWriter(f, fieldnames=accounts[0].keys())
+                            writer.writeheader()
+                            writer.writerows(accounts)
+                
+                QMessageBox.information(self, '成功', f'成功导出 {len(accounts)} 个账户')
+            
+            except Exception as e:
+                QMessageBox.warning(self, '错误', f'导出失败: {str(e)}')
+    
+    def batch_activate(self):
+        """批量激活选中的账户"""
+        selected_accounts = self.get_selected_accounts()
+        if not selected_accounts:
+            QMessageBox.warning(self, '提示', '请先选择要激活的账户')
+            return
+        
+        activated_count = 0
+        for account_id in selected_accounts:
+            try:
+                if self.account_manager:
+                    # 激活账户逻辑
+                    self.account_manager.activate_account(account_id)
+                    activated_count += 1
+            except Exception as e:
+                print(f'激活账户 {account_id} 失败: {e}')
+        
+        self.load_accounts()
+        QMessageBox.information(self, '成功', f'成功激活 {activated_count} 个账户')
+    
+    def batch_pause(self):
+        """批量暂停选中的账户"""
+        selected_accounts = self.get_selected_accounts()
+        if not selected_accounts:
+            QMessageBox.warning(self, '提示', '请先选择要暂停的账户')
+            return
+        
+        paused_count = 0
+        for account_id in selected_accounts:
+            try:
+                if self.account_manager:
+                    # 暂停账户逻辑
+                    self.account_manager.pause_account(account_id)
+                    paused_count += 1
+            except Exception as e:
+                print(f'暂停账户 {account_id} 失败: {e}')
+        
+        self.load_accounts()
+        QMessageBox.information(self, '成功', f'成功暂停 {paused_count} 个账户')
+    
+    def batch_refresh_selected(self):
+        """批量刷新选中的账户"""
+        selected_accounts = self.get_selected_accounts()
+        if not selected_accounts:
+            QMessageBox.warning(self, '提示', '请先选择要刷新的账户')
+            return
+        
+        refreshed_count = 0
+        for account_id in selected_accounts:
+            try:
+                if self.account_manager:
+                    self.account_manager.refresh_account_status(account_id)
+                    refreshed_count += 1
+            except Exception as e:
+                print(f'刷新账户 {account_id} 失败: {e}')
+        
+        self.load_accounts()
+        QMessageBox.information(self, '成功', f'成功刷新 {refreshed_count} 个账户')
+    
+    def copy_selected_emails(self):
+        """复制选中账户的邮箱"""
+        selected_accounts = self.get_selected_accounts()
+        if not selected_accounts:
+            QMessageBox.warning(self, '提示', '请先选择要复制邮箱的账户')
+            return
+        
+        emails = []
+        accounts = self.account_manager.get_accounts_with_health_and_limits() if self.account_manager else []
+        
+        for account in accounts:
+            if account.get('id') in selected_accounts:
+                emails.append(account.get('email', ''))
+        
+        if emails:
+            from PyQt5.QtWidgets import QApplication
+            clipboard = QApplication.clipboard()
+            clipboard.setText('\n'.join(emails))
+            QMessageBox.information(self, '成功', f'已复制 {len(emails)} 个邮箱地址到剪贴板')
+    
+    def get_selected_accounts(self):
+        """获取选中的账户ID列表"""
+        selected = []
+        for row in range(self.table_widget.rowCount()):
+            checkbox_widget = self.table_widget.cellWidget(row, 0)
+            if checkbox_widget:
+                checkbox = checkbox_widget.findChild(QCheckBox)
+                if checkbox and checkbox.isChecked():
+                    account_id = checkbox.property('account_id')
+                    if account_id:
+                        selected.append(account_id)
+        return selected
+    
+    def show_advanced_filter(self):
+        """显示高级筛选对话框"""
+        dialog = AdvancedFilterDialog(self)
+        if dialog.exec_():
+            # 应用筛选条件
+            self.apply_advanced_filter(dialog.get_filter_criteria())
+    
+    def apply_advanced_filter(self, criteria):
+        """应用高级筛选条件"""
+        # TODO: 实现高级筛选逻辑
+        self.update_table_view()
+
+
+class AdvancedFilterDialog(QDialog):
+    """高级筛选对话框"""
+    
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle('高级筛选')
+        self.setModal(True)
+        self.setMinimumWidth(400)
+        self.init_ui()
+    
+    def init_ui(self):
+        layout = QVBoxLayout()
+        
+        # 创建表单布局
+        form_layout = QFormLayout()
+        
+        # 状态筛选
+        self.status_combo = QComboBox()
+        self.status_combo.addItems(['全部', '活跃', '未活跃', '已封禁', '已过期'])
+        form_layout.addRow('状态:', self.status_combo)
+        
+        # 使用率筛选
+        usage_layout = QHBoxLayout()
+        self.usage_min = QSpinBox()
+        self.usage_min.setRange(0, 100)
+        self.usage_min.setSuffix('%')
+        usage_layout.addWidget(self.usage_min)
+        usage_layout.addWidget(QLabel('至'))
+        self.usage_max = QSpinBox()
+        self.usage_max.setRange(0, 100)
+        self.usage_max.setValue(100)
+        self.usage_max.setSuffix('%')
+        usage_layout.addWidget(self.usage_max)
+        form_layout.addRow('使用率:', usage_layout)
+        
+        # 过期时间筛选
+        self.expiry_combo = QComboBox()
+        self.expiry_combo.addItems([
+            '全部', '永久', '7天内过期', '30天内过期', '已过期'
+        ])
+        form_layout.addRow('过期时间:', self.expiry_combo)
+        
+        layout.addLayout(form_layout)
+        
+        # 按钮
+        buttons = QDialogButtonBox(
+            QDialogButtonBox.Ok | QDialogButtonBox.Cancel,
+            Qt.Horizontal, self
+        )
+        buttons.accepted.connect(self.accept)
+        buttons.cancelled.connect(self.reject)
+        layout.addWidget(buttons)
+        
+        self.setLayout(layout)
+    
+    def get_filter_criteria(self):
+        """获取筛选条件"""
+        return {
+            'status': self.status_combo.currentText(),
+            'usage_min': self.usage_min.value(),
+            'usage_max': self.usage_max.value(),
+            'expiry': self.expiry_combo.currentText()
+        }
